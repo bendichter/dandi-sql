@@ -1,0 +1,23 @@
+{% extends 'dandisets/base.html' %}
+
+{% block title %}Dataset Not Found - DANDI{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <div class="text-center py-5">
+            <i class="fas fa-exclamation-triangle fa-5x text-warning mb-4"></i>
+            <h1 class="display-4">Dataset Not Found</h1>
+            <p class="lead text-muted">
+                The dataset with ID <code>{{ dandi_id }}</code> could not be found.
+            </p>
+            <p class="text-muted">
+                This dataset may not exist, may have been removed, or the ID may be incorrect.
+            </p>
+            <a href="{% url 'dandisets:search' %}" class="btn btn-primary">
+                <i class="fas fa-search"></i> Back to Search
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}

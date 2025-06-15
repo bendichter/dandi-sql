@@ -1,0 +1,491 @@
+{% extends 'dandisets/base.html' %}
+
+{% block title %}Search Dandisets - DANDI{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <h1 class="mb-4">
+            <i class="fas fa-search"></i> Search DANDI Datasets
+        </h1>
+        
+        <!-- Search Form -->
+        <div class="filter-section">
+            <form method="get" id="searchForm">
+                <div class="row">
+                    <!-- Text Search -->
+                    <div class="col-md-12 mb-3">
+                        <label for="search" class="form-label">
+                            <i class="fas fa-font"></i> Text Search
+                        </label>
+                        <input type="text" 
+                               class="form-control" 
+                               id="search" 
+                               name="search" 
+                               value="{{ current_filters.search|default:'' }}"
+                               placeholder="Search in name, description, or keywords...">
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <!-- Species Filter -->
+                    <div class="col-md-6 mb-3">
+                        <label for="species" class="form-label">
+                            <i class="fas fa-paw"></i> Species
+                        </label>
+                        <select class="form-select" id="species" name="species" multiple size="4">
+                            {% for species in filter_options.species %}
+                                <option value="{{ species.id }}" 
+                                        {% if species.id|stringformat:"s" in current_filters.species %}selected{% endif %}>
+                                    {{ species.name }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <small class="form-text text-muted">Hold Ctrl/Cmd to select multiple</small>
+                    </div>
+                    
+                    <!-- Anatomy Filter -->
+                    <div class="col-md-6 mb-3">
+                        <label for="anatomy" class="form-label">
+                            <i class="fas fa-brain"></i> Anatomy
+                        </label>
+                        <select class="form-select" id="anatomy" name="anatomy" multiple size="4">
+                            {% for anatomy in filter_options.anatomy %}
+                                <option value="{{ anatomy.id }}" 
+                                        {% if anatomy.id|stringformat:"s" in current_filters.anatomy %}selected{% endif %}>
+                                    {{ anatomy.name }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <small class="form-text text-muted">Hold Ctrl/Cmd to select multiple</small>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <!-- Approach Filter -->
+                    <div class="col-md-6 mb-3">
+                        <label for="approach" class="form-label">
+                            <i class="fas fa-microscope"></i> Approach
+                        </label>
+                        <select class="form-select" id="approach" name="approach" multiple size="4">
+                            {% for approach in filter_options.approaches %}
+                                <option value="{{ approach.id }}" 
+                                        {% if approach.id|stringformat:"s" in current_filters.approach %}selected{% endif %}>
+                                    {{ approach.name }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <small class="form-text text-muted">Hold Ctrl/Cmd to select multiple</small>
+                    </div>
+                    
+                    <!-- Measurement Technique Filter -->
+                    <div class="col-md-6 mb-3">
+                        <label for="measurement_technique" class="form-label">
+                            <i class="fas fa-tools"></i> Measurement Technique
+                        </label>
+                        <select class="form-select" id="measurement_technique" name="measurement_technique" multiple size="4">
+                            {% for technique in filter_options.measurement_techniques %}
+                                <option value="{{ technique.id }}" 
+                                        {% if technique.id|stringformat:"s" in current_filters.measurement_technique %}selected{% endif %}>
+                                    {{ technique.name }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <small class="form-text text-muted">Hold Ctrl/Cmd to select multiple</small>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <!-- File Format Filter -->
+                    <div class="col-md-6 mb-3">
+                        <label for="file_format" class="form-label">
+                            <i class="fas fa-file-code"></i> File Format
+                        </label>
+                        <select class="form-select" id="file_format" name="file_format" multiple size="4">
+                            <option value="application/x-nwb" 
+                                    {% if 'application/x-nwb' in current_filters.file_format %}selected{% endif %}>
+                                NWB (Neurodata Without Borders)
+                            </option>
+                            <option value="application/x-hdf5" 
+                                    {% if 'application/x-hdf5' in current_filters.file_format %}selected{% endif %}>
+                                HDF5
+                            </option>
+                            <option value="image/tiff" 
+                                    {% if 'image/tiff' in current_filters.file_format %}selected{% endif %}>
+                                TIFF
+                            </option>
+                            <option value="video/mp4" 
+                                    {% if 'video/mp4' in current_filters.file_format %}selected{% endif %}>
+                                MP4
+                            </option>
+                            <option value="application/json" 
+                                    {% if 'application/json' in current_filters.file_format %}selected{% endif %}>
+                                JSON
+                            </option>
+                        </select>
+                        <small class="form-text text-muted">Hold Ctrl/Cmd to select multiple</small>
+                    </div>
+                    
+                    <!-- Data Standards Filter -->
+                    <div class="col-md-6 mb-3">
+                        <label for="data_standards" class="form-label">
+                            <i class="fas fa-certificate"></i> Data Standards
+                        </label>
+                        <select class="form-select" id="data_standards" name="data_standards" multiple size="4">
+                            {% for standard in filter_options.data_standards %}
+                                <option value="{{ standard.id }}" 
+                                        {% if standard.id|stringformat:"s" in current_filters.data_standards %}selected{% endif %}>
+                                    {{ standard.name }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <small class="form-text text-muted">Hold Ctrl/Cmd to select multiple</small>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <!-- Variables Measured Filter -->
+                    <div class="col-md-6 mb-3">
+                        <label for="variables_measured" class="form-label">
+                            <i class="fas fa-chart-line"></i> Variables Measured
+                        </label>
+                        <select class="form-select" id="variables_measured" name="variables_measured" multiple size="4">
+                            {% for variable_tuple in filter_options.variables_measured %}
+                                <option value="{{ variable_tuple.0 }}" 
+                                        {% if variable_tuple.0 in current_filters.variables_measured %}selected{% endif %}>
+                                    {{ variable_tuple.1 }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <small class="form-text text-muted">Hold Ctrl/Cmd to select multiple</small>
+                    </div>
+                </div>
+                
+                <!-- Numeric Filters -->
+                <div class="row">
+                    <!-- Number of Subjects -->
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">
+                            <i class="fas fa-users"></i> Number of Subjects
+                        </label>
+                        <div class="row">
+                            <div class="col-6">
+                                <input type="number" 
+                                       class="form-control" 
+                                       name="min_subjects" 
+                                       value="{{ current_filters.min_subjects|default:'' }}"
+                                       placeholder="Min" 
+                                       min="0">
+                            </div>
+                            <div class="col-6">
+                                <input type="number" 
+                                       class="form-control" 
+                                       name="max_subjects" 
+                                       value="{{ current_filters.max_subjects|default:'' }}"
+                                       placeholder="Max" 
+                                       min="0">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Number of Files -->
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">
+                            <i class="fas fa-file"></i> Number of Files
+                        </label>
+                        <div class="row">
+                            <div class="col-6">
+                                <input type="number" 
+                                       class="form-control" 
+                                       name="min_files" 
+                                       value="{{ current_filters.min_files|default:'' }}"
+                                       placeholder="Min" 
+                                       min="0">
+                            </div>
+                            <div class="col-6">
+                                <input type="number" 
+                                       class="form-control" 
+                                       name="max_files" 
+                                       value="{{ current_filters.max_files|default:'' }}"
+                                       placeholder="Max" 
+                                       min="0">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <!-- Dataset Size -->
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">
+                            <i class="fas fa-hdd"></i> Dataset Size (GB)
+                        </label>
+                        <div class="row">
+                            <div class="col-6">
+                                <input type="number" 
+                                       class="form-control" 
+                                       name="min_size" 
+                                       value="{{ current_filters.min_size|default:'' }}"
+                                       placeholder="Min" 
+                                       min="0" 
+                                       step="0.1">
+                            </div>
+                            <div class="col-6">
+                                <input type="number" 
+                                       class="form-control" 
+                                       name="max_size" 
+                                       value="{{ current_filters.max_size|default:'' }}"
+                                       placeholder="Max" 
+                                       min="0" 
+                                       step="0.1">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Date Range Filters -->
+                <div class="row">
+                    <!-- Publication Date Range -->
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">
+                            <i class="fas fa-calendar-check"></i> Publication Date Range
+                        </label>
+                        <div class="row">
+                            <div class="col-6">
+                                <input type="date" 
+                                       class="form-control" 
+                                       name="pub_date_start" 
+                                       value="{{ current_filters.pub_date_start|default:'' }}"
+                                       title="Start date">
+                            </div>
+                            <div class="col-6">
+                                <input type="date" 
+                                       class="form-control" 
+                                       name="pub_date_end" 
+                                       value="{{ current_filters.pub_date_end|default:'' }}"
+                                       title="End date">
+                            </div>
+                        </div>
+                        <small class="form-text text-muted">Filter by when datasets were published</small>
+                    </div>
+                    
+                    <!-- Creation Date Range -->
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">
+                            <i class="fas fa-calendar-plus"></i> Creation Date Range
+                        </label>
+                        <div class="row">
+                            <div class="col-6">
+                                <input type="date" 
+                                       class="form-control" 
+                                       name="created_date_start" 
+                                       value="{{ current_filters.created_date_start|default:'' }}"
+                                       title="Start date">
+                            </div>
+                            <div class="col-6">
+                                <input type="date" 
+                                       class="form-control" 
+                                       name="created_date_end" 
+                                       value="{{ current_filters.created_date_end|default:'' }}"
+                                       title="End date">
+                            </div>
+                        </div>
+                        <small class="form-text text-muted">Filter by when research was conducted</small>
+                    </div>
+                </div>
+                
+                <!-- Form Actions -->
+                <div class="row">
+                    <div class="col-md-12">
+                        <button type="submit" class="btn btn-primary me-2">
+                            <i class="fas fa-search"></i> Search
+                        </button>
+                        <a href="{% url 'dandisets:search' %}" class="btn btn-outline-secondary">
+                            <i class="fas fa-undo"></i> Clear Filters
+                        </a>
+                    </div>
+                </div>
+            </form>
+        </div>
+        
+        <!-- Search Results Summary -->
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h3>Search Results</h3>
+            <div class="stats-card">
+                <div class="row text-center">
+                    <div class="col">
+                        <div class="h4 mb-0">{{ total_results }}</div>
+                        <small>Dataset{{ total_results|pluralize }}</small>
+                    </div>
+                    {% if stats.min_subjects and stats.max_subjects %}
+                    <div class="col border-start">
+                        <div class="h6 mb-0">{{ stats.min_subjects }}-{{ stats.max_subjects }}</div>
+                        <small>Subjects Range</small>
+                    </div>
+                    {% endif %}
+                    {% if stats.min_size_gb and stats.max_size_gb %}
+                    <div class="col border-start">
+                        <div class="h6 mb-0">{{ stats.min_size_gb }}-{{ stats.max_size_gb }} GB</div>
+                        <small>Size Range</small>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <!-- Search Results -->
+        {% if dandisets %}
+            <div class="row">
+                {% for dandiset in dandisets %}
+                <div class="col-md-12 mb-4">
+                    <div class="card dandiset-card">
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-8">
+                                    <h5 class="card-title">
+                                        <a href="https://dandiarchive.org/dandiset/{{ dandiset.dandi_id|slice:'6:' }}" 
+                                           class="text-decoration-none"
+                                           target="_blank"
+                                           rel="noopener noreferrer">
+                                            {{ dandiset.name }}
+                                            <i class="fas fa-external-link-alt ms-1" style="font-size: 0.8em;"></i>
+                                        </a>
+                                    </h5>
+                                    <p class="card-text text-muted mb-2">
+                                        <strong>ID:</strong> {{ dandiset.dandi_id }}
+                                    </p>
+                                    <p class="card-text">
+                                        {{ dandiset.description|truncatewords:30 }}
+                                    </p>
+                                    
+                                    <!-- Tags for anatomy, species, etc. -->
+                                    <div class="mb-2">
+                                        {% for about in dandiset.dandisetabout_set.all %}
+                                            {% if about.anatomy %}
+                                                <span class="badge badge-anatomy me-1">
+                                                    <i class="fas fa-brain"></i> {{ about.anatomy.name }}
+                                                </span>
+                                            {% endif %}
+                                        {% endfor %}
+                                        
+                                        {% if dandiset.assets_summary %}
+                                            {% for species_rel in dandiset.assets_summary.assetssummaryspecies_set.all %}
+                                                <span class="badge badge-species me-1">
+                                                    <i class="fas fa-paw"></i> {{ species_rel.species.name }}
+                                                </span>
+                                            {% endfor %}
+                                            
+                                            {% for approach_rel in dandiset.assets_summary.assetssummaryapproach_set.all %}
+                                                <span class="badge badge-approach me-1">
+                                                    <i class="fas fa-microscope"></i> {{ approach_rel.approach.name }}
+                                                </span>
+                                            {% endfor %}
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                
+                                <div class="col-md-4">
+                                    {% if dandiset.assets_summary %}
+                                    <div class="text-end">
+                                        <div class="mb-2">
+                                            <i class="fas fa-users text-primary"></i>
+                                            <strong>{{ dandiset.assets_summary.number_of_subjects|default:"N/A" }}</strong> subjects
+                                        </div>
+                                        <div class="mb-2">
+                                            <i class="fas fa-file text-primary"></i>
+                                            <strong>{{ dandiset.assets_summary.number_of_files }}</strong> files
+                                        </div>
+                                        <div class="mb-2">
+                                            <i class="fas fa-hdd text-primary"></i>
+                                            <span class="size-display">
+                                                {% if dandiset.assets_summary.number_of_bytes %}
+                                                    {{ dandiset.assets_summary.number_of_bytes|filesizeformat }}
+                                                {% else %}
+                                                    N/A
+                                                {% endif %}
+                                            </span>
+                                        </div>
+                                        {% if dandiset.date_published %}
+                                        <div class="text-muted">
+                                            <small>
+                                                <i class="fas fa-calendar"></i>
+                                                Published {{ dandiset.date_published|date:"M d, Y" }}
+                                            </small>
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            
+            <!-- Pagination -->
+            {% if page_obj.has_other_pages %}
+            <nav aria-label="Search results pagination">
+                <ul class="pagination justify-content-center">
+                    {% if page_obj.has_previous %}
+                        <li class="page-item">
+                            <a class="page-link" href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ page_obj.previous_page_number }}">
+                                Previous
+                            </a>
+                        </li>
+                    {% endif %}
+                    
+                    {% for num in page_obj.paginator.page_range %}
+                        {% if page_obj.number == num %}
+                            <li class="page-item active">
+                                <span class="page-link">{{ num }}</span>
+                            </li>
+                        {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+                            <li class="page-item">
+                                <a class="page-link" href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ num }}">
+                                    {{ num }}
+                                </a>
+                            </li>
+                        {% endif %}
+                    {% endfor %}
+                    
+                    {% if page_obj.has_next %}
+                        <li class="page-item">
+                            <a class="page-link" href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ page_obj.next_page_number }}">
+                                Next
+                            </a>
+                        </li>
+                    {% endif %}
+                </ul>
+            </nav>
+            {% endif %}
+            
+        {% else %}
+            <div class="text-center py-5">
+                <i class="fas fa-search fa-3x text-muted mb-3"></i>
+                <h4 class="text-muted">No datasets found</h4>
+                <p class="text-muted">Try adjusting your search criteria or clearing filters.</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Auto-submit form when filters change
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('searchForm');
+    const selects = form.querySelectorAll('select[multiple]');
+    
+    selects.forEach(select => {
+        select.addEventListener('change', function() {
+            // Add a small delay to allow multiple selections
+            setTimeout(() => {
+                form.submit();
+            }, 100);
+        });
+    });
+});
+</script>
+{% endblock %}

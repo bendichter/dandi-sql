@@ -1,0 +1,341 @@
+{% extends 'dandisets/base.html' %}
+
+{% block title %}{{ dandiset.name }} - DANDI{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <!-- Breadcrumb -->
+        <nav aria-label="breadcrumb" class="mb-4">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item">
+                    <a href="{% url 'dandisets:search' %}">
+                        <i class="fas fa-search"></i> Search
+                    </a>
+                </li>
+                <li class="breadcrumb-item active" aria-current="page">
+                    {{ dandiset.dandi_id }}
+                </li>
+            </ol>
+        </nav>
+        
+        <!-- Header -->
+        <div class="row mb-4">
+            <div class="col-md-8">
+                <h1>{{ dandiset.name }}</h1>
+                <p class="lead text-muted">{{ dandiset.dandi_id }}</p>
+            </div>
+            <div class="col-md-4 text-end">
+                {% if dandiset.url %}
+                <a href="{{ dandiset.url }}" class="btn btn-primary" target="_blank">
+                    <i class="fas fa-external-link-alt"></i> View on DANDI
+                </a>
+                {% endif %}
+                {% if dandiset.doi %}
+                <a href="https://doi.org/{{ dandiset.doi }}" class="btn btn-outline-secondary" target="_blank">
+                    <i class="fas fa-book"></i> DOI
+                </a>
+                {% endif %}
+            </div>
+        </div>
+        
+        <!-- Summary Cards -->
+        {% if dandiset.assets_summary %}
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <i class="fas fa-users fa-2x text-primary mb-2"></i>
+                        <h4>{{ dandiset.assets_summary.number_of_subjects|default:"N/A" }}</h4>
+                        <p class="text-muted mb-0">Subject{{ dandiset.assets_summary.number_of_subjects|pluralize }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <i class="fas fa-file fa-2x text-primary mb-2"></i>
+                        <h4>{{ dandiset.assets_summary.number_of_files }}</h4>
+                        <p class="text-muted mb-0">File{{ dandiset.assets_summary.number_of_files|pluralize }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <i class="fas fa-hdd fa-2x text-primary mb-2"></i>
+                        <h4 class="size-display">
+                            {% if dandiset.assets_summary.number_of_bytes %}
+                                {{ dandiset.assets_summary.number_of_bytes|filesizeformat }}
+                            {% else %}
+                                N/A
+                            {% endif %}
+                        </h4>
+                        <p class="text-muted mb-0">Total Size</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <i class="fas fa-microscope fa-2x text-primary mb-2"></i>
+                        <h4>{{ dandiset.assets_summary.number_of_samples|default:"N/A" }}</h4>
+                        <p class="text-muted mb-0">Sample{{ dandiset.assets_summary.number_of_samples|pluralize }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+        
+        <!-- Main Content -->
+        <div class="row">
+            <div class="col-md-8">
+                <!-- Description -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-info-circle"></i> Description
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <p>{{ dandiset.description|linebreaksbr }}</p>
+                    </div>
+                </div>
+                
+                <!-- Variable Measured -->
+                {% if dandiset.assets_summary.variable_measured %}
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-chart-line"></i> Variables Measured
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            {% for variable in dandiset.assets_summary.variable_measured %}
+                            <div class="col-md-6 mb-2">
+                                <span class="badge bg-info">{{ variable }}</span>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+                
+                <!-- Keywords -->
+                {% if dandiset.keywords %}
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-tags"></i> Keywords
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        {% for keyword in dandiset.keywords %}
+                            <span class="badge bg-secondary me-1">{{ keyword }}</span>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+                
+                <!-- Citation -->
+                {% if dandiset.citation %}
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-quote-left"></i> Citation
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <blockquote class="blockquote">
+                            <p class="mb-0">{{ dandiset.citation }}</p>
+                        </blockquote>
+                    </div>
+                </div>
+                {% endif %}
+                
+                <!-- Related Resources -->
+                {% if related_resources %}
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-link"></i> Related Resources
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        {% for resource in related_resources %}
+                        <div class="mb-2">
+                            {% if resource.url %}
+                            <a href="{{ resource.url }}" target="_blank" class="text-decoration-none">
+                                <i class="fas fa-external-link-alt"></i> {{ resource.name|default:resource.url }}
+                            </a>
+                            {% else %}
+                            <span>{{ resource.name }}</span>
+                            {% endif %}
+                            {% if resource.relation %}
+                            <small class="text-muted">({{ resource.get_relation_display }})</small>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+            
+            <!-- Sidebar -->
+            <div class="col-md-4">
+                <!-- Metadata -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-info"></i> Metadata
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        {% if dandiset.date_published %}
+                        <div class="mb-2">
+                            <strong>Published:</strong><br>
+                            <small>{{ dandiset.date_published|date:"F d, Y" }}</small>
+                        </div>
+                        {% endif %}
+                        
+                        {% if dandiset.date_created %}
+                        <div class="mb-2">
+                            <strong>Created:</strong><br>
+                            <small>{{ dandiset.date_created|date:"F d, Y" }}</small>
+                        </div>
+                        {% endif %}
+                        
+                        {% if dandiset.version %}
+                        <div class="mb-2">
+                            <strong>Version:</strong><br>
+                            <small>{{ dandiset.version }}</small>
+                        </div>
+                        {% endif %}
+                        
+                        {% if dandiset.license %}
+                        <div class="mb-2">
+                            <strong>License:</strong><br>
+                            {% for license in dandiset.license %}
+                            <span class="badge bg-warning text-dark">{{ license }}</span>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <!-- Species -->
+                {% if species_list %}
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-paw"></i> Species
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        {% for species in species_list %}
+                        <div class="mb-2">
+                            <span class="badge badge-species">{{ species.name }}</span>
+                            {% if species.identifier %}
+                            <br><small class="text-muted">{{ species.identifier }}</small>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+                
+                <!-- Anatomy -->
+                {% if anatomy_list %}
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-brain"></i> Anatomy
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        {% for anatomy in anatomy_list %}
+                        <div class="mb-2">
+                            <span class="badge badge-anatomy">{{ anatomy.name }}</span>
+                            {% if anatomy.identifier %}
+                            <br><small class="text-muted">{{ anatomy.identifier }}</small>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+                
+                <!-- Approaches -->
+                {% if approaches %}
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-microscope"></i> Approaches
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        {% for approach in approaches %}
+                        <div class="mb-2">
+                            <span class="badge badge-approach">{{ approach.name }}</span>
+                            {% if approach.identifier %}
+                            <br><small class="text-muted">{{ approach.identifier }}</small>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+                
+                <!-- Measurement Techniques -->
+                {% if measurement_techniques %}
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-tools"></i> Measurement Techniques
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        {% for technique in measurement_techniques %}
+                        <div class="mb-2">
+                            <span class="badge badge-technique">{{ technique.name }}</span>
+                            {% if technique.identifier %}
+                            <br><small class="text-muted">{{ technique.identifier }}</small>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+                
+                <!-- Contributors -->
+                {% if contributors %}
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-users"></i> Contributors
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        {% for contributor in contributors %}
+                        <div class="mb-3">
+                            <strong>{{ contributor.name }}</strong>
+                            {% if contributor.email %}
+                            <br><small class="text-muted">{{ contributor.email }}</small>
+                            {% endif %}
+                            {% if contributor.role_name %}
+                            <br>
+                            {% for role in contributor.role_name %}
+                            <span class="badge bg-light text-dark">{{ role }}</span>
+                            {% endfor %}
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
