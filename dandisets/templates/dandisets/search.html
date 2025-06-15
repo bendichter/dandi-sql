@@ -368,19 +368,6 @@
             </form>
         </div>
         
-        <!-- Display Options (Outside Form) -->
-        <div class="mb-3">
-            <div class="form-check">
-                <input class="form-check-input" 
-                       type="checkbox" 
-                       id="show_assets_toggle" 
-                       {% if current_filters.show_assets %}checked{% endif %}>
-                <label class="form-check-label" for="show_assets_toggle">
-                    <i class="fas fa-eye"></i> Show matching assets in results
-                </label>
-            </div>
-            <small class="form-text text-muted">Toggle to show/hide individual asset files that match your criteria</small>
-        </div>
         
         <!-- Search Results Summary -->
         <div class="d-flex justify-content-between align-items-center mb-3">
@@ -492,85 +479,92 @@
                                 </div>
                             </div>
                             
-                            <!-- Matching Assets -->
+                            <!-- Assets Accordion -->
                             {% if dandiset.matching_assets %}
-                            <div class="assets-section mt-3"{% if not current_filters.show_assets %} style="display: none;"{% endif %}>
-                                <h6 class="mb-2">
-                                    <i class="fas fa-file-alt text-success"></i> 
-                                    Matching Assets ({{ dandiset.matching_assets|length }})
-                                    {% if dandiset.assets_summary.number_of_files %}
-                                        <small class="text-muted">
-                                            out of {{ dandiset.assets_summary.number_of_files }} total files
-                                        </small>
-                                    {% endif %}
-                                </h6>
-                                
-                                <div class="assets-list">
-                                    {% for asset in dandiset.matching_assets %}
-                                    <div class="asset-item mb-2 p-2 border rounded">
-                                        <div class="row align-items-center">
-                                            <div class="col-md-8">
-                                                <div class="asset-path">
-                                                    <i class="fas fa-file-code text-muted me-1"></i>
-                                                    <code class="text-break">{{ asset.path }}</code>
-                                                </div>
-                                            </div>
-                                            <div class="col-md-4 text-end">
-                                                <div class="asset-meta">
-                                                    <span class="badge bg-secondary me-1">
-                                                        {% if asset.encoding_format == 'application/x-nwb' %}
-                                                            NWB
-                                                        {% elif asset.encoding_format == 'application/x-hdf5' %}
-                                                            HDF5
-                                                        {% elif asset.encoding_format == 'image/tiff' %}
-                                                            TIFF
-                                                        {% elif asset.encoding_format == 'video/mp4' %}
-                                                            MP4
-                                                        {% elif asset.encoding_format == 'application/json' %}
-                                                            JSON
-                                                        {% else %}
-                                                            {{ asset.encoding_format }}
+                            <div class="accordion mt-3" id="assetsAccordion{{ forloop.counter }}">
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header" id="assetsHeading{{ forloop.counter }}">
+                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#assetsCollapse{{ forloop.counter }}" aria-expanded="false" aria-controls="assetsCollapse{{ forloop.counter }}">
+                                            <i class="fas fa-file-alt text-success me-2"></i>
+                                            <strong>Matching Assets ({{ dandiset.matching_assets|length }})</strong>
+                                            {% if dandiset.assets_summary.number_of_files %}
+                                                <small class="text-muted ms-2">
+                                                    out of {{ dandiset.assets_summary.number_of_files }} total files
+                                                </small>
+                                            {% endif %}
+                                        </button>
+                                    </h2>
+                                    <div id="assetsCollapse{{ forloop.counter }}" class="accordion-collapse collapse" aria-labelledby="assetsHeading{{ forloop.counter }}" data-bs-parent="#assetsAccordion{{ forloop.counter }}">
+                                        <div class="accordion-body">
+                                            <div class="assets-list">
+                                                {% for asset in dandiset.matching_assets %}
+                                                <div class="asset-item mb-2 p-2 border rounded">
+                                                    <div class="row align-items-center">
+                                                        <div class="col-md-8">
+                                                            <div class="asset-path">
+                                                                <i class="fas fa-file-code text-muted me-1"></i>
+                                                                <code class="text-break">{{ asset.path }}</code>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-md-4 text-end">
+                                                            <div class="asset-meta">
+                                                                <span class="badge bg-secondary me-1">
+                                                                    {% if asset.encoding_format == 'application/x-nwb' %}
+                                                                        NWB
+                                                                    {% elif asset.encoding_format == 'application/x-hdf5' %}
+                                                                        HDF5
+                                                                    {% elif asset.encoding_format == 'image/tiff' %}
+                                                                        TIFF
+                                                                    {% elif asset.encoding_format == 'video/mp4' %}
+                                                                        MP4
+                                                                    {% elif asset.encoding_format == 'application/json' %}
+                                                                        JSON
+                                                                    {% else %}
+                                                                        {{ asset.encoding_format }}
+                                                                    {% endif %}
+                                                                </span>
+                                                                <span class="text-muted">
+                                                                    {{ asset.content_size|filesizeformat }}
+                                                                </span>
+                                                                {% if asset.date_modified %}
+                                                                <br>
+                                                                <small class="text-muted">
+                                                                    Modified: {{ asset.date_modified|date:"M d, Y" }}
+                                                                </small>
+                                                                {% endif %}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <!-- Variables measured in this asset -->
+                                                    {% if asset.variable_measured %}
+                                                    <div class="mt-1">
+                                                        <small class="text-muted">Variables: </small>
+                                                        {% for variable in asset.variable_measured|slice:":5" %}
+                                                            {% if variable.value %}
+                                                                <span class="badge bg-light text-dark me-1">{{ variable.value }}</span>
+                                                            {% elif variable %}
+                                                                <span class="badge bg-light text-dark me-1">{{ variable }}</span>
+                                                            {% endif %}
+                                                        {% endfor %}
+                                                        {% if asset.variable_measured|length > 5 %}
+                                                            <span class="text-muted">... +{{ asset.variable_measured|length|add:"-5" }} more</span>
                                                         {% endif %}
-                                                    </span>
-                                                    <span class="text-muted">
-                                                        {{ asset.content_size|filesizeformat }}
-                                                    </span>
-                                                    {% if asset.date_modified %}
-                                                    <br>
-                                                    <small class="text-muted">
-                                                        Modified: {{ asset.date_modified|date:"M d, Y" }}
-                                                    </small>
+                                                    </div>
                                                     {% endif %}
                                                 </div>
+                                                {% endfor %}
+                                                
+                                                {% if dandiset.assets_summary.number_of_files > 10 %}
+                                                <div class="text-center mt-2">
+                                                    <small class="text-muted">
+                                                        ... showing first 10 assets
+                                                    </small>
+                                                </div>
+                                                {% endif %}
                                             </div>
                                         </div>
-                                        
-                                        <!-- Variables measured in this asset -->
-                                        {% if asset.variable_measured %}
-                                        <div class="mt-1">
-                                            <small class="text-muted">Variables: </small>
-                                            {% for variable in asset.variable_measured|slice:":5" %}
-                                                {% if variable.value %}
-                                                    <span class="badge bg-light text-dark me-1">{{ variable.value }}</span>
-                                                {% elif variable %}
-                                                    <span class="badge bg-light text-dark me-1">{{ variable }}</span>
-                                                {% endif %}
-                                            {% endfor %}
-                                            {% if asset.variable_measured|length > 5 %}
-                                                <span class="text-muted">... +{{ asset.variable_measured|length|add:"-5" }} more</span>
-                                            {% endif %}
-                                        </div>
-                                        {% endif %}
                                     </div>
-                                    {% endfor %}
-                                    
-                                    {% if dandiset.assets_summary.number_of_files > 10 %}
-                                    <div class="text-center mt-2">
-                                        <small class="text-muted">
-                                            ... showing first 10 assets
-                                        </small>
-                                    </div>
-                                    {% endif %}
                                 </div>
                             </div>
                             {% endif %}
@@ -669,31 +663,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }, 100);
         });
     });
-    
-    // Handle assets display toggle
-    const assetsToggle = document.getElementById('show_assets_toggle');
-    const assetsSections = document.querySelectorAll('.assets-section');
-    
-    if (assetsToggle) {
-        assetsToggle.addEventListener('change', function() {
-            assetsSections.forEach(section => {
-                if (this.checked) {
-                    section.style.display = 'block';
-                } else {
-                    section.style.display = 'none';
-                }
-            });
-            
-            // Update the URL parameter to maintain state
-            const url = new URL(window.location);
-            if (this.checked) {
-                url.searchParams.set('show_assets', '1');
-            } else {
-                url.searchParams.delete('show_assets');
-            }
-            window.history.replaceState({}, '', url);
-        });
-    }
 });
 </script>
 {% endblock %}
