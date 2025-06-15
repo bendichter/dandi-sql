@@ -646,3 +646,28 @@ class AssetWasGeneratedBy(models.Model):
     
     class Meta:
         unique_together = ['asset', 'activity']
+
+
+class SyncTracker(models.Model):
+    """Track the last sync timestamps for incremental updates"""
+    SYNC_TYPE_CHOICES = [
+        ('full', 'Full Sync'),
+        ('dandisets', 'Dandisets Only'),
+        ('assets', 'Assets Only'),
+    ]
+    
+    sync_type = models.CharField(max_length=20, choices=SYNC_TYPE_CHOICES, default='full')
+    last_sync_timestamp = models.DateTimeField(help_text="When the last sync was completed")
+    dandisets_synced = models.IntegerField(default=0, help_text="Number of dandisets synced")
+    assets_synced = models.IntegerField(default=0, help_text="Number of assets synced")
+    dandisets_updated = models.IntegerField(default=0, help_text="Number of dandisets updated")
+    assets_updated = models.IntegerField(default=0, help_text="Number of assets updated")
+    sync_duration_seconds = models.FloatField(default=0.0, help_text="Duration of sync in seconds")
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        get_latest_by = 'created_at'
+    
+    def __str__(self):
+        return f"{self.sync_type} sync at {self.last_sync_timestamp}"
