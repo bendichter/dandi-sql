@@ -27,6 +27,15 @@
                                title="Download asset file">
                                 <i class="fas fa-download"></i> Download
                             </a>
+                            {% if asset.encoding_format == 'application/x-nwb' %}
+                                <a href="https://neurosift.app/nwb?url=https://api.dandiarchive.org/api/assets/{{ asset.dandi_asset_id }}/download/&dandisetId={{ dandiset_number }}&dandisetVersion={{ dandiset_version }}" 
+                                   target="_blank" 
+                                   rel="noopener noreferrer"
+                                   class="btn btn-sm btn-outline-primary me-1"
+                                   title="View NWB file in Neurosift">
+                                    <i class="fas fa-brain"></i> Neurosift
+                                </a>
+                            {% endif %}
                         </div>
                     {% endif %}
                 {% endwith %}

@@ -519,17 +519,13 @@
                                             <i class="fas fa-file-alt text-success me-2"></i>
                                             <strong>View Assets</strong>
                                             {% if item.total_assets %}
-                                                <small class="text-muted ms-2" id="assetCount{{ dandiset.id }}">
-                                                    {% if has_any_filters %}
-                                                        {% if has_asset_filters %}
-                                                            ({{ item.filtered_assets }} of {{ item.total_assets }} files match filters)
-                                                        {% else %}
-                                                            ({{ item.total_assets }} total files - filtered by dataset criteria)
-                                                        {% endif %}
-                                                    {% else %}
-                                                        ({{ item.total_assets }} total files)
-                                                    {% endif %}
-                                                </small>
+                                            <small class="text-muted ms-2" id="assetCount{{ dandiset.id }}">
+                                                {% if has_any_filters %}
+                                                    ({{ item.filtered_assets }} of {{ item.total_assets }} files match filters)
+                                                {% else %}
+                                                    ({{ item.total_assets }} total files)
+                                                {% endif %}
+                                            </small>
                                             {% endif %}
                                         </button>
                                     </h2>
@@ -741,8 +737,6 @@ function updateAccordionButtonText(dandisetId, filteredCount, totalCount) {
     // Update text based on whether there are filters applied
     if (!hasAnyFilters) {
         textContainer.textContent = `(${totalCount} total files)`;
-    } else if (filteredCount === totalCount) {
-        textContainer.textContent = `(${totalCount} total files - filtered by dataset criteria)`;
     } else {
         textContainer.textContent = `(${filteredCount} of ${totalCount} files match filters)`;
     }
