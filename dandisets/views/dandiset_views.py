@@ -144,6 +144,32 @@ def search_dandisets(request):
             ).distinct()
             filters['measurement_technique'] = technique_params
     
+    # Subject sex filter (dandiset level) - handle both IDs and names
+    sex_params = request.GET.getlist('sex')
+    if sex_params:
+        from ..models import SexType
+        # Try to get sex by name first, fall back to ID if numeric
+        sex_ids = []
+        for param in sex_params:
+            try:
+                # Try as ID first
+                if param.isdigit():
+                    sex_ids.append(int(param))
+                else:
+                    # Try as name
+                    sex = SexType.objects.filter(name=param).first()
+                    if sex:
+                        sex_ids.append(sex.id)
+            except (ValueError, TypeError):
+                continue
+        
+        if sex_ids:
+            # Filter dandisets that have assets with participants of the specified sex
+            dandisets = dandisets.filter(
+                assets__attributed_to__participant__sex__id__in=sex_ids
+            ).distinct()
+            filters['sex'] = sex_params
+    
     # Number of subjects filter
     min_subjects = request.GET.get('min_subjects')
     max_subjects = request.GET.get('max_subjects')
@@ -284,6 +310,8 @@ def search_dandisets(request):
     asset_path_search = request.GET.get('asset_path', '').strip()
     asset_min_size = request.GET.get('asset_min_size')
     asset_max_size = request.GET.get('asset_max_size')
+    asset_dandiset_id = request.GET.get('asset_dandiset_id', '').strip()
+    asset_sex_params = request.GET.getlist('asset_sex')
     
     # Build asset query for filtering dandisets and optionally showing assets
     asset_query = Q()
@@ -319,34 +347,70 @@ def search_dandisets(request):
         except (ValueError, TypeError):
             pass
     
+    # Subject sex filter for assets
+    if asset_sex_params:
+        from ..models import SexType
+        sex_ids = []
+        for param in asset_sex_params:
+            try:
+                # Try as ID first
+                if param.isdigit():
+                    sex_ids.append(int(param))
+                else:
+                    # Try as name
+                    sex = SexType.objects.filter(name=param).first()
+                    if sex:
+                        sex_ids.append(sex.id)
+            except (ValueError, TypeError):
+                continue
+        
+        if sex_ids:
+            # Filter assets by participant sex using the relationship:
+            # Asset → AssetWasAttributedTo → Participant → SexType
+            asset_query &= Q(attributed_to__participant__sex__id__in=sex_ids)
+            filters['asset_sex'] = asset_sex_params
+            has_asset_filters = True
+    
+    # Dandiset ID filter for assets
+    if asset_dandiset_id:
+        # Handle both full DANDI ID format (DANDI:000001) and just the number (000001)
+        if asset_dandiset_id.startswith('DANDI:'):
+            dandiset_number = asset_dandiset_id[6:]  # Remove 'DANDI:' prefix
+        else:
+            dandiset_number = asset_dandiset_id
+        
+        # Filter assets that belong to dandisets with this base_id pattern
+        asset_query &= Q(dandisets__base_id__icontains=dandiset_number)
+        filters['asset_dandiset_id'] = asset_dandiset_id
+        has_asset_filters = True
+    
     # If we have asset filters, filter dandisets that contain matching assets
     if has_asset_filters:
         dandisets = dandisets.filter(assets__in=Asset.objects.filter(asset_query)).distinct()
-    
-    # Always load matching assets for frontend toggle functionality
-    if has_asset_filters:
-        # Show only matching assets
-        matching_assets_prefetch = Prefetch(
-            'assets',
-            queryset=Asset.objects.filter(asset_query).order_by('path')[:10],
-            to_attr='matching_assets'
-        )
-    else:
-        # Show all assets (limited to first 10 for performance)
-        matching_assets_prefetch = Prefetch(
-            'assets',
-            queryset=Asset.objects.order_by('path')[:10],
-            to_attr='matching_assets'
-        )
-    dandisets = dandisets.prefetch_related(matching_assets_prefetch)
     
     # Order by name
     dandisets = dandisets.order_by('name')
     
     # Pagination
-    paginator = Paginator(dandisets, 20)  # Show 20 dandisets per page
+    paginator = Paginator(dandisets, 6)  # Show 6 dandisets per page
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)
+    
+    # Calculate asset counts for each dandiset in the current page
+    dandisets_with_counts = []
+    for dandiset in page_obj:
+        total_assets = dandiset.assets.count()
+        filtered_assets = total_assets  # Default to total if no asset filters
+        
+        if has_asset_filters:
+            # Calculate how many assets match the filters for this specific dandiset
+            filtered_assets = dandiset.assets.filter(asset_query).count()
+        
+        dandisets_with_counts.append({
+            'dandiset': dandiset,
+            'total_assets': total_assets,
+            'filtered_assets': filtered_assets,
+        })
     
     # Get filter options for the form
     filter_options = get_filter_options()
@@ -357,10 +421,12 @@ def search_dandisets(request):
     context = {
         'page_obj': page_obj,
         'dandisets': page_obj,
+        'dandisets_with_counts': dandisets_with_counts,
         'filter_options': filter_options,
         'current_filters': filters,
         'stats': stats,
         'total_results': paginator.count,
+        'has_asset_filters': has_asset_filters,
     }
     
     return render(request, 'dandisets/search.html', context)

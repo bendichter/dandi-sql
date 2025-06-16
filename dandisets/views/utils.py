@@ -136,7 +136,7 @@ def get_deduplicated_species():
 
 def get_filter_options():
     """Get all available filter options"""
-    from ..models import AssetsSummary
+    from ..models import AssetsSummary, SexType
     
     # Get unique variables measured from the database
     variables_measured = get_unique_variables_measured()
@@ -148,6 +148,7 @@ def get_filter_options():
         'measurement_techniques': MeasurementTechniqueType.objects.all().order_by('name')[:50],  # Limit for demo
         'data_standards': StandardsType.objects.all().order_by('name')[:50],  # Limit for demo
         'variables_measured': variables_measured[:50],  # Limit for demo
+        'sex_types': SexType.objects.all().order_by('name'),  # Sex types for asset filtering
     }
 
 

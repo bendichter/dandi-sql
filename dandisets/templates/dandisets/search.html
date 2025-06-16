@@ -96,6 +96,24 @@
                 </div>
                 
                 <div class="row">
+                    <!-- Subject Sex Filter (Dandiset Level) -->
+                    <div class="col-md-6 mb-3">
+                        <label for="sex" class="form-label">
+                            <i class="fas fa-venus-mars"></i> Subject Sex
+                        </label>
+                        <select class="form-select" id="sex" name="sex" multiple size="3">
+                            {% for sex in filter_options.sex_types %}
+                                <option value="{{ sex.id }}" 
+                                        {% if sex.id|stringformat:"s" in current_filters.sex or sex.name in current_filters.sex %}selected{% endif %}>
+                                    {{ sex.name }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <small class="form-text text-muted">Filter dandisets by subject sex. Hold Ctrl/Cmd to select multiple</small>
+                    </div>
+                </div>
+                
+                <div class="row">
                     <!-- File Format Filter -->
                     <div class="col-md-6 mb-3">
                         <label for="file_format" class="form-label">
@@ -320,9 +338,39 @@
                                            value="{{ current_filters.asset_path|default:'' }}"
                                            placeholder="Search in file paths and names...">
                                 </div>
+                                
+                                <!-- Dandiset ID Filter -->
+                                <div class="col-md-6 mb-3">
+                                    <label for="asset_dandiset_id" class="form-label">
+                                        <i class="fas fa-database"></i> Dandiset ID
+                                    </label>
+                                    <input type="text" 
+                                           class="form-control" 
+                                           id="asset_dandiset_id" 
+                                           name="asset_dandiset_id" 
+                                           value="{{ current_filters.asset_dandiset_id|default:'' }}"
+                                           placeholder="e.g., DANDI:000001 or 000001">
+                                    <small class="form-text text-muted">Filter assets from specific dandisets</small>
+                                </div>
                             </div>
                             
                             <div class="row">
+                                <!-- Sex Filter -->
+                                <div class="col-md-6 mb-3">
+                                    <label for="asset_sex" class="form-label">
+                                        <i class="fas fa-venus-mars"></i> Subject Sex
+                                    </label>
+                                    <select class="form-select" id="asset_sex" name="asset_sex" multiple size="3">
+                                        {% for sex in filter_options.sex_types %}
+                                            <option value="{{ sex.id }}" 
+                                                    {% if sex.id|stringformat:"s" in current_filters.asset_sex or sex.name in current_filters.asset_sex %}selected{% endif %}>
+                                                {{ sex.name }}
+                                            </option>
+                                        {% endfor %}
+                                    </select>
+                                    <small class="form-text text-muted">Filter assets by subject sex. Hold Ctrl/Cmd to select multiple</small>
+                                </div>
+                                
                                 <!-- Asset File Size Filter -->
                                 <div class="col-md-6 mb-3">
                                     <label class="form-label">
@@ -395,9 +443,10 @@
         </div>
         
         <!-- Search Results -->
-        {% if dandisets %}
+        {% if dandisets_with_counts %}
             <div class="row">
-                {% for dandiset in dandisets %}
+                {% for item in dandisets_with_counts %}
+                {% with dandiset=item.dandiset %}
                 <div class="col-md-12 mb-4">
                     <div class="card dandiset-card">
                         <div class="card-body">
@@ -480,97 +529,44 @@
                             </div>
                             
                             <!-- Assets Accordion -->
-                            {% if dandiset.matching_assets %}
                             <div class="accordion mt-3" id="assetsAccordion{{ forloop.counter }}">
                                 <div class="accordion-item">
                                     <h2 class="accordion-header" id="assetsHeading{{ forloop.counter }}">
-                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#assetsCollapse{{ forloop.counter }}" aria-expanded="false" aria-controls="assetsCollapse{{ forloop.counter }}">
+                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#assetsCollapse{{ forloop.counter }}" aria-expanded="false" aria-controls="assetsCollapse{{ forloop.counter }}" data-dandiset-id="{{ dandiset.id }}" data-collapse-id="assetsCollapse{{ forloop.counter }}">
                                             <i class="fas fa-file-alt text-success me-2"></i>
-                                            <strong>Matching Assets ({{ dandiset.matching_assets|length }})</strong>
-                                            {% if dandiset.assets_summary.number_of_files %}
-                                                <small class="text-muted ms-2">
-                                                    out of {{ dandiset.assets_summary.number_of_files }} total files
+                                            <strong>View Assets</strong>
+                                            {% if item.total_assets %}
+                                                <small class="text-muted ms-2" id="assetCount{{ dandiset.id }}">
+                                                    {% if has_asset_filters %}
+                                                        ({{ item.filtered_assets }} of {{ item.total_assets }} files match filters)
+                                                    {% else %}
+                                                        ({{ item.total_assets }} total files)
+                                                    {% endif %}
                                                 </small>
                                             {% endif %}
                                         </button>
                                     </h2>
                                     <div id="assetsCollapse{{ forloop.counter }}" class="accordion-collapse collapse" aria-labelledby="assetsHeading{{ forloop.counter }}" data-bs-parent="#assetsAccordion{{ forloop.counter }}">
                                         <div class="accordion-body">
-                                            <div class="assets-list">
-                                                {% for asset in dandiset.matching_assets %}
-                                                <div class="asset-item mb-2 p-2 border rounded">
-                                                    <div class="row align-items-center">
-                                                        <div class="col-md-8">
-                                                            <div class="asset-path">
-                                                                <i class="fas fa-file-code text-muted me-1"></i>
-                                                                <code class="text-break">{{ asset.path }}</code>
-                                                            </div>
-                                                        </div>
-                                                        <div class="col-md-4 text-end">
-                                                            <div class="asset-meta">
-                                                                <span class="badge bg-secondary me-1">
-                                                                    {% if asset.encoding_format == 'application/x-nwb' %}
-                                                                        NWB
-                                                                    {% elif asset.encoding_format == 'application/x-hdf5' %}
-                                                                        HDF5
-                                                                    {% elif asset.encoding_format == 'image/tiff' %}
-                                                                        TIFF
-                                                                    {% elif asset.encoding_format == 'video/mp4' %}
-                                                                        MP4
-                                                                    {% elif asset.encoding_format == 'application/json' %}
-                                                                        JSON
-                                                                    {% else %}
-                                                                        {{ asset.encoding_format }}
-                                                                    {% endif %}
-                                                                </span>
-                                                                <span class="text-muted">
-                                                                    {{ asset.content_size|filesizeformat }}
-                                                                </span>
-                                                                {% if asset.date_modified %}
-                                                                <br>
-                                                                <small class="text-muted">
-                                                                    Modified: {{ asset.date_modified|date:"M d, Y" }}
-                                                                </small>
-                                                                {% endif %}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    
-                                                    <!-- Variables measured in this asset -->
-                                                    {% if asset.variable_measured %}
-                                                    <div class="mt-1">
-                                                        <small class="text-muted">Variables: </small>
-                                                        {% for variable in asset.variable_measured|slice:":5" %}
-                                                            {% if variable.value %}
-                                                                <span class="badge bg-light text-dark me-1">{{ variable.value }}</span>
-                                                            {% elif variable %}
-                                                                <span class="badge bg-light text-dark me-1">{{ variable }}</span>
-                                                            {% endif %}
-                                                        {% endfor %}
-                                                        {% if asset.variable_measured|length > 5 %}
-                                                            <span class="text-muted">... +{{ asset.variable_measured|length|add:"-5" }} more</span>
-                                                        {% endif %}
-                                                    </div>
-                                                    {% endif %}
+                                            <div id="assetsPagination{{ dandiset.id }}" class="assets-pagination-container">
+                                                <!-- Pagination controls will be loaded here -->
+                                            </div>
+                                            <div id="assetsList{{ dandiset.id }}" class="assets-list">
+                                                <div class="text-center py-3">
+                                                    <i class="fas fa-spinner fa-spin"></i> Loading assets...
                                                 </div>
-                                                {% endfor %}
-                                                
-                                                {% if dandiset.assets_summary.number_of_files > 10 %}
-                                                <div class="text-center mt-2">
-                                                    <small class="text-muted">
-                                                        ... showing first 10 assets
-                                                    </small>
-                                                </div>
-                                                {% endif %}
+                                            </div>
+                                            <div id="assetsPaginationBottom{{ dandiset.id }}" class="assets-pagination-bottom">
+                                                <!-- Bottom pagination controls will be loaded here -->
                                             </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
-                            {% endif %}
                         </div>
                     </div>
                 </div>
+                {% endwith %}
                 {% endfor %}
             </div>
             
@@ -650,6 +646,9 @@
 
 {% block extra_js %}
 <script>
+// Store loaded assets to avoid reloading
+const loadedAssets = new Set();
+
 // Function to build clean URL with only non-empty parameters
 function buildCleanUrl(form) {
     const params = new URLSearchParams();
@@ -686,6 +685,117 @@ function buildCleanUrl(form) {
     return window.location.pathname + (queryString ? '?' + queryString : '');
 }
 
+// Function to get current search filters from the form
+function getCurrentFilters() {
+    const form = document.getElementById('searchForm');
+    const formData = new FormData(form);
+    const params = new URLSearchParams();
+    
+    for (const [key, value] of formData.entries()) {
+        if (value && value.trim() !== '') {
+            params.append(key, value);
+        }
+    }
+    
+    return params.toString();
+}
+
+// Function to load assets for a dandiset
+function loadDandisetAssets(dandisetId, collapseId) {
+    // Check if already loaded
+    if (loadedAssets.has(dandisetId)) {
+        return;
+    }
+    
+    // Mark as loaded
+    loadedAssets.add(dandisetId);
+    
+    // Get current filters
+    const filters = getCurrentFilters();
+    
+    // Make AJAX request
+    const url = `{% url 'dandisets:api_dandiset_assets' 0 %}`.replace('0', dandisetId) + (filters ? '?' + filters : '');
+    
+    fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            // Update assets list
+            document.getElementById(`assetsList${dandisetId}`).innerHTML = data.assets_html;
+            
+            // Update pagination (only show if there are multiple pages)
+            if (data.total_pages > 1) {
+                document.getElementById(`assetsPagination${dandisetId}`).innerHTML = data.pagination_html;
+                document.getElementById(`assetsPaginationBottom${dandisetId}`).innerHTML = data.pagination_html;
+            }
+            
+            // Update accordion button text with both counts
+            updateAccordionButtonText(dandisetId, data.total_count, data.total_assets_count);
+        })
+        .catch(error => {
+            console.error('Error loading assets:', error);
+            document.getElementById(`assetsList${dandisetId}`).innerHTML = 
+                '<div class="text-center py-3 text-danger"><i class="fas fa-exclamation-triangle"></i> Error loading assets</div>';
+        });
+}
+
+// Function to update accordion button text with counts
+function updateAccordionButtonText(dandisetId, filteredCount, totalCount) {
+    // Find the accordion button for this dandiset
+    const button = document.querySelector(`[data-dandiset-id="${dandisetId}"]`);
+    if (!button) return;
+    
+    // Find the text element within the button
+    const textContainer = button.querySelector('small.text-muted');
+    if (!textContainer) return;
+    
+    // Update text based on whether there are filters applied
+    if (filteredCount === totalCount) {
+        textContainer.textContent = `(${totalCount} total files)`;
+    } else {
+        textContainer.textContent = `(${filteredCount} of ${totalCount} files match filters)`;
+    }
+}
+
+// Function to load a specific page of assets
+function loadAssetsPage(dandisetId, page) {
+    // Get current filters
+    const filters = getCurrentFilters();
+    
+    // Build URL with page parameter
+    let url = `{% url 'dandisets:api_dandiset_assets' 0 %}`.replace('0', dandisetId);
+    const params = new URLSearchParams(filters);
+    params.set('page', page);
+    url += '?' + params.toString();
+    
+    // Show loading spinner
+    document.getElementById(`assetsList${dandisetId}`).innerHTML = 
+        '<div class="text-center py-3"><i class="fas fa-spinner fa-spin"></i> Loading assets...</div>';
+    
+    fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            // Update assets list
+            document.getElementById(`assetsList${dandisetId}`).innerHTML = data.assets_html;
+            
+            // Update pagination
+            if (data.total_pages > 1) {
+                document.getElementById(`assetsPagination${dandisetId}`).innerHTML = data.pagination_html;
+                document.getElementById(`assetsPaginationBottom${dandisetId}`).innerHTML = data.pagination_html;
+            } else {
+                document.getElementById(`assetsPagination${dandisetId}`).innerHTML = '';
+                document.getElementById(`assetsPaginationBottom${dandisetId}`).innerHTML = '';
+            }
+            
+            // Update accordion button text with both counts
+            updateAccordionButtonText(dandisetId, data.total_count, data.total_assets_count);
+        })
+        .catch(error => {
+            console.error('Error loading assets page:', error);
+            document.getElementById(`assetsList${dandisetId}`).innerHTML = 
+                '<div class="text-center py-3 text-danger"><i class="fas fa-exclamation-triangle"></i> Error loading assets</div>';
+        });
+}
+
 // Auto-submit form when filters change
 document.addEventListener('DOMContentLoaded', function() {
     const form = document.getElementById('searchForm');
@@ -706,6 +816,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 window.location.href = cleanUrl;
             }, 100);
         });
+    });
+    
+    // Handle accordion button clicks to load assets
+    document.addEventListener('click', function(e) {
+        if (e.target.closest('[data-bs-toggle="collapse"][data-dandiset-id]')) {
+            const button = e.target.closest('[data-bs-toggle="collapse"][data-dandiset-id]');
+            const dandisetId = button.dataset.dandisetId;
+            const collapseId = button.dataset.collapseId;
+            
+            // Load assets when accordion is opened
+            setTimeout(() => {
+                loadDandisetAssets(parseInt(dandisetId), collapseId);
+            }, 100); // Small delay to ensure accordion starts opening
+        }
     });
 });
 </script>

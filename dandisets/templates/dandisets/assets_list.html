@@ -1,0 +1,75 @@
+{% load dandi_filters %}
+{% for asset in assets %}
+<div class="asset-item mb-2 p-2 border rounded">
+    <div class="row align-items-center">
+        <div class="col-md-8">
+            <div class="asset-path">
+                <i class="fas fa-file-code text-muted me-1"></i>
+                <code class="text-break">{{ asset.path }}</code>
+            </div>
+            
+            <!-- Asset API Link -->
+            {% if asset.dandi_asset_id and dandiset.dandi_id %}
+                {% with dandiset_number=dandiset.dandi_id|get_dandiset_number dandiset_version=dandiset.dandi_id|get_dandiset_version %}
+                    {% if dandiset_number and dandiset_version %}
+                        <div class="mt-1">
+                            <a href="https://api.dandiarchive.org/api/dandisets/{{ dandiset_number }}/versions/{{ dandiset_version }}/assets/{{ asset.dandi_asset_id }}/" 
+                               target="_blank" 
+                               rel="noopener noreferrer"
+                               class="btn btn-sm btn-outline-info me-1"
+                               title="View asset details in DANDI API">
+                                <i class="fas fa-info-circle"></i> Asset Info
+                            </a>
+                        </div>
+                    {% endif %}
+                {% endwith %}
+            {% endif %}
+        </div>
+        <div class="col-md-4 text-end">
+            <div class="asset-meta">
+                <span class="badge bg-secondary me-1">
+                    {% if asset.encoding_format == 'application/x-nwb' %}
+                        NWB
+                    {% elif asset.encoding_format == 'application/x-hdf5' %}
+                        HDF5
+                    {% elif asset.encoding_format == 'image/tiff' %}
+                        TIFF
+                    {% elif asset.encoding_format == 'video/mp4' %}
+                        MP4
+                    {% elif asset.encoding_format == 'application/json' %}
+                        JSON
+                    {% else %}
+                        {{ asset.encoding_format }}
+                    {% endif %}
+                </span>
+                <span class="text-muted">
+                    {{ asset.content_size|filesizeformat }}
+                </span>
+                {% if asset.date_modified %}
+                <br>
+                <small class="text-muted">
+                    Modified: {{ asset.date_modified|date:"M d, Y" }}
+                </small>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <!-- Variables measured in this asset -->
+    {% if asset.variable_measured %}
+    <div class="mt-1">
+        <small class="text-muted">Variables: </small>
+        {% for variable in asset.variable_measured|slice:":5" %}
+            {% if variable.value %}
+                <span class="badge bg-light text-dark me-1">{{ variable.value }}</span>
+            {% elif variable %}
+                <span class="badge bg-light text-dark me-1">{{ variable }}</span>
+            {% endif %}
+        {% endfor %}
+        {% if asset.variable_measured|length > 5 %}
+            <span class="text-muted">... +{{ asset.variable_measured|length|add:"-5" }} more</span>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endfor %}

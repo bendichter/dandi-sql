@@ -1,0 +1,59 @@
+{% if page_obj.paginator.count > 10 %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <small class="text-muted">
+        Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} 
+        of {{ page_obj.paginator.count }} assets
+    </small>
+    <div class="btn-group btn-group-sm" role="group">
+        {% if page_obj.has_previous %}
+            <button class="btn btn-outline-primary btn-sm" onclick="loadAssetsPage({{ dandiset.id }}, {{ page_obj.previous_page_number }})">
+                <i class="fas fa-chevron-left"></i> Prev
+            </button>
+        {% endif %}
+        <span class="btn btn-outline-secondary btn-sm disabled">
+            Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+        </span>
+        {% if page_obj.has_next %}
+            <button class="btn btn-outline-primary btn-sm" onclick="loadAssetsPage({{ dandiset.id }}, {{ page_obj.next_page_number }})">
+                Next <i class="fas fa-chevron-right"></i>
+            </button>
+        {% endif %}
+    </div>
+</div>
+
+<div class="d-flex justify-content-center mt-3">
+    <nav aria-label="Asset pagination">
+        <ul class="pagination pagination-sm">
+            {% if page_obj.has_previous %}
+                <li class="page-item">
+                    <button class="page-link" onclick="loadAssetsPage({{ dandiset.id }}, {{ page_obj.previous_page_number }})">
+                        Previous
+                    </button>
+                </li>
+            {% endif %}
+            
+            {% for num in page_obj.paginator.page_range %}
+                {% if page_obj.number == num %}
+                    <li class="page-item active">
+                        <span class="page-link">{{ num }}</span>
+                    </li>
+                {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+                    <li class="page-item">
+                        <button class="page-link" onclick="loadAssetsPage({{ dandiset.id }}, {{ num }})">
+                            {{ num }}
+                        </button>
+                    </li>
+                {% endif %}
+            {% endfor %}
+            
+            {% if page_obj.has_next %}
+                <li class="page-item">
+                    <button class="page-link" onclick="loadAssetsPage({{ dandiset.id }}, {{ page_obj.next_page_number }})">
+                        Next
+                    </button>
+                </li>
+            {% endif %}
+        </ul>
+    </nav>
+</div>
+{% endif %}
