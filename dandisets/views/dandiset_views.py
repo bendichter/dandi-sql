@@ -30,11 +30,12 @@ def search_dandisets(request):
         )
         filters['search'] = search_query
     
-    # Species filter - handle both IDs and names
+    # Species filter - handle both IDs and formatted names
     species_params = request.GET.getlist('species')
     if species_params:
         from ..models import AssetsSummarySpecies, SpeciesType
-        # Try to get species by name first, fall back to ID if numeric
+        from .utils import get_deduplicated_species
+        
         species_ids = []
         for param in species_params:
             try:
@@ -42,10 +43,17 @@ def search_dandisets(request):
                 if param.isdigit():
                     species_ids.append(int(param))
                 else:
-                    # Try as name
-                    species = SpeciesType.objects.filter(name=param).first()
-                    if species:
-                        species_ids.append(species.id)
+                    # Try as formatted name (e.g., "Mus musculus - Mouse")
+                    deduplicated_species = get_deduplicated_species()
+                    for species_group in deduplicated_species:
+                        if species_group['name'] == param:
+                            species_ids.extend(species_group['all_ids'])
+                            break
+                    else:
+                        # Fallback: try direct name match
+                        species = SpeciesType.objects.filter(name=param).first()
+                        if species:
+                            species_ids.append(species.id)
             except (ValueError, TypeError):
                 continue
         

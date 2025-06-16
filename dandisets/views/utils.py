@@ -1,6 +1,137 @@
 from django.db.models import Count, Min, Max
 from ..models import SpeciesType, Anatomy, ApproachType, MeasurementTechniqueType, StandardsType
 import json
+import re
+
+
+def standardize_species_name(name):
+    """Standardize species names to reduce duplicates and return formatted display name"""
+    if not name:
+        return name, name
+    
+    # Convert to lowercase for comparison
+    standardized = name.lower().strip()
+    
+    # Common standardizations - maps to (scientific_name, common_name)
+    standardizations = {
+        # Mouse variants
+        r'\bmus musculus\b': ('Mus musculus', 'Mouse'),
+        r'\bmouse\b': ('Mus musculus', 'Mouse'),
+        r'\bhouse mouse\b': ('Mus musculus', 'Mouse'),
+        
+        # Rat variants
+        r'\brattus norvegicus\b': ('Rattus norvegicus', 'Rat'),
+        r'\brat\b': ('Rattus norvegicus', 'Rat'),
+        r'\bnorway rat\b': ('Rattus norvegicus', 'Rat'),
+        
+        # Human variants
+        r'\bhomo sapiens\b': ('Homo sapiens', 'Human'),
+        r'\bhuman\b': ('Homo sapiens', 'Human'),
+        
+        # Macaque variants
+        r'\bmacaca mulatta\b': ('Macaca mulatta', 'Rhesus Macaque'),
+        r'\brhesus macaque\b': ('Macaca mulatta', 'Rhesus Macaque'),
+        r'\brhesus monkey\b': ('Macaca mulatta', 'Rhesus Macaque'),
+        
+        # Pig-tailed macaque variants
+        r'\bmacaca nemestrina\b': ('Macaca nemestrina', 'Pig-tailed Macaque'),
+        r'\bpig-tailed macaque\b': ('Macaca nemestrina', 'Pig-tailed Macaque'),
+        r'\bpigtailed macaque\b': ('Macaca nemestrina', 'Pig-tailed Macaque'),
+        
+        # Fly variants
+        r'\bdrosophila melanogaster\b': ('Drosophila melanogaster', 'Fruit Fly'),
+        r'\bfruit fly\b': ('Drosophila melanogaster', 'Fruit Fly'),
+        
+        # Zebrafish variants
+        r'\bdanio rerio\b': ('Danio rerio', 'Zebrafish'),
+        r'\bzebrafish\b': ('Danio rerio', 'Zebrafish'),
+        
+        # C. elegans variants
+        r'\bcaenorhabditis elegans\b': ('Caenorhabditis elegans', 'Nematode'),
+        r'\bc\. elegans\b': ('Caenorhabditis elegans', 'Nematode'),
+        r'\bnematode\b': ('Caenorhabditis elegans', 'Nematode'),
+        
+        # Cattle variants
+        r'\bbos taurus\b': ('Bos taurus', 'Cattle'),
+        r'\bcattle\b': ('Bos taurus', 'Cattle'),
+        r'\bcow\b': ('Bos taurus', 'Cattle'),
+        
+        # Pig variants
+        r'\bsus scrofa\b': ('Sus scrofa', 'Pig'),
+        r'\bpig\b': ('Sus scrofa', 'Pig'),
+        r'\bswine\b': ('Sus scrofa', 'Pig'),
+        
+        # Dog variants
+        r'\bcanis lupus familiaris\b': ('Canis lupus familiaris', 'Dog'),
+        r'\bdog\b': ('Canis lupus familiaris', 'Dog'),
+        
+        # Cat variants
+        r'\bfelis catus\b': ('Felis catus', 'Cat'),
+        r'\bcat\b': ('Felis catus', 'Cat'),
+        
+        # Chicken variants
+        r'\bgallus gallus\b': ('Gallus gallus', 'Chicken'),
+        r'\bchicken\b': ('Gallus gallus', 'Chicken'),
+    }
+    
+    # Apply standardizations
+    for pattern, (scientific, common) in standardizations.items():
+        if re.search(pattern, standardized):
+            return f"{scientific} - {common}", scientific
+    
+    # If no standardization found, try to parse if it's already in scientific format
+    title_name = name.title().strip()
+    if ' ' in title_name and len(title_name.split()) >= 2:
+        # Assume it's already a scientific name
+        return f"{title_name} - {title_name}", title_name
+    else:
+        # Single word, treat as common name
+        return f"{title_name} - {title_name}", title_name
+
+
+def get_deduplicated_species():
+    """Get deduplicated and standardized species list"""
+    all_species = SpeciesType.objects.all().order_by('name')
+    
+    # Group species by scientific name (the key from standardization)
+    species_groups = {}
+    
+    for species in all_species:
+        display_name, scientific_name = standardize_species_name(species.name)
+        
+        if scientific_name not in species_groups:
+            species_groups[scientific_name] = {
+                'display_name': display_name,
+                'species_list': []
+            }
+        species_groups[scientific_name]['species_list'].append(species)
+    
+    # Create deduplicated list with representative species and all IDs
+    deduplicated_species = []
+    
+    for scientific_name, group_data in species_groups.items():
+        species_list = group_data['species_list']
+        display_name = group_data['display_name']
+        
+        # Use the first species as the representative
+        representative = species_list[0]
+        
+        # Collect all IDs that map to this scientific name
+        all_ids = [s.id for s in species_list]
+        
+        # Create a custom object with standardized name and all associated IDs
+        deduplicated_species.append({
+            'id': representative.id,  # Primary ID for the option value
+            'name': display_name,  # Formatted display name (e.g., "Mus musculus - Mouse")
+            'scientific_name': scientific_name,  # Scientific name for matching
+            'all_ids': all_ids,  # All IDs that map to this scientific name
+            'original_names': [s.name for s in species_list]  # Original names for debugging
+        })
+    
+    # Sort by display name
+    deduplicated_species.sort(key=lambda x: x['name'])
+    
+    return deduplicated_species
 
 
 def get_filter_options():
@@ -11,7 +142,7 @@ def get_filter_options():
     variables_measured = get_unique_variables_measured()
     
     return {
-        'species': SpeciesType.objects.all().order_by('name')[:50],  # Limit for demo
+        'species': get_deduplicated_species()[:50],  # Deduplicated species
         'anatomy': Anatomy.objects.all().order_by('name')[:50],  # Limit for demo
         'approaches': ApproachType.objects.all().order_by('name')[:50],  # Limit for demo
         'measurement_techniques': MeasurementTechniqueType.objects.all().order_by('name')[:50],  # Limit for demo
