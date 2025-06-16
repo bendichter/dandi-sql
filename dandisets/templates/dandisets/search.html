@@ -95,23 +95,6 @@
                     </div>
                 </div>
                 
-                <div class="row">
-                    <!-- Subject Sex Filter (Dandiset Level) -->
-                    <div class="col-md-6 mb-3">
-                        <label for="sex" class="form-label">
-                            <i class="fas fa-venus-mars"></i> Subject Sex
-                        </label>
-                        <select class="form-select" id="sex" name="sex" multiple size="3">
-                            {% for sex in filter_options.sex_types %}
-                                <option value="{{ sex.id }}" 
-                                        {% if sex.id|stringformat:"s" in current_filters.sex or sex.name in current_filters.sex %}selected{% endif %}>
-                                    {{ sex.name }}
-                                </option>
-                            {% endfor %}
-                        </select>
-                        <small class="form-text text-muted">Filter dandisets by subject sex. Hold Ctrl/Cmd to select multiple</small>
-                    </div>
-                </div>
                 
                 <div class="row">
                     <!-- File Format Filter -->
