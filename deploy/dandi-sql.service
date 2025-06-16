@@ -1,0 +1,33 @@
+[Unit]
+Description=DANDI SQL Django Application
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=notify
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/dandi-sql
+Environment=DJANGO_SETTINGS_MODULE=dandi_sql.settings_production
+Environment=PATH=/opt/dandi-sql/venv/bin
+ExecStart=/opt/dandi-sql/venv/bin/gunicorn --config /opt/dandi-sql/gunicorn.conf.py dandi_sql.wsgi:application
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dandi-sql
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/dandi-sql /var/log/dandi-sql /var/run/dandi-sql
+
+# Resource limits
+LimitNOFILE=65536
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

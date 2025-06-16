@@ -1,0 +1,25 @@
+# Production requirements extending base requirements
+-r requirements.txt
+
+# WSGI server
+gunicorn>=21.2.0
+
+# Static file serving
+whitenoise>=6.6.0
+
+# Production database optimizations
+psycopg2-binary>=2.9.0
+
+# Process management and monitoring
+supervisor>=4.2.0
+
+# Security
+django-cors-headers>=4.3.0
+
+# Optional: For better logging
+python-json-logger>=2.0.0
+
+# Optional: For health checks
+django-health-check>=3.17.0
+dj-database-url>=2.1.0
+whitenoise>=6.6.0

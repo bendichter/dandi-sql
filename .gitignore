@@ -162,3 +162,4 @@ settings_local.py
 
 # Backup files
 *.bak
+staticfiles/

@@ -1,0 +1,8 @@
+# DANDI SQL Daily Sync Cron Job
+# This file should be placed in /etc/cron.d/dandi-sync
+
+# Run DANDI sync every day at 2:00 AM
+0 2 * * * www-data cd /opt/dandi-sql && /opt/dandi-sql/venv/bin/python manage.py sync_dandi_incremental --verbose --no-progress >> /var/log/dandi-sql/sync.log 2>&1
+
+# Log rotation helper - clean old logs every month
+0 1 1 * * www-data find /var/log/dandi-sql -name "*.log" -mtime +30 -delete
