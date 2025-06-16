@@ -396,6 +396,9 @@ def search_dandisets(request):
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)
     
+    # Check if any filters are applied (including dandiset-level filters)
+    has_any_filters = bool(filters) or has_asset_filters
+    
     # Calculate asset counts for each dandiset in the current page
     dandisets_with_counts = []
     for dandiset in page_obj:
@@ -427,6 +430,7 @@ def search_dandisets(request):
         'stats': stats,
         'total_results': paginator.count,
         'has_asset_filters': has_asset_filters,
+        'has_any_filters': has_any_filters,
     }
     
     return render(request, 'dandisets/search.html', context)

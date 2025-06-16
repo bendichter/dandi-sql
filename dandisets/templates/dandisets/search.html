@@ -520,8 +520,12 @@
                                             <strong>View Assets</strong>
                                             {% if item.total_assets %}
                                                 <small class="text-muted ms-2" id="assetCount{{ dandiset.id }}">
-                                                    {% if has_asset_filters %}
-                                                        ({{ item.filtered_assets }} of {{ item.total_assets }} files match filters)
+                                                    {% if has_any_filters %}
+                                                        {% if has_asset_filters %}
+                                                            ({{ item.filtered_assets }} of {{ item.total_assets }} files match filters)
+                                                        {% else %}
+                                                            ({{ item.total_assets }} total files - filtered by dataset criteria)
+                                                        {% endif %}
                                                     {% else %}
                                                         ({{ item.total_assets }} total files)
                                                     {% endif %}
@@ -731,9 +735,14 @@ function updateAccordionButtonText(dandisetId, filteredCount, totalCount) {
     const textContainer = button.querySelector('small.text-muted');
     if (!textContainer) return;
     
+    // Check if any filters are applied by examining the current URL
+    const hasAnyFilters = window.location.search.length > 0;
+    
     // Update text based on whether there are filters applied
-    if (filteredCount === totalCount) {
+    if (!hasAnyFilters) {
         textContainer.textContent = `(${totalCount} total files)`;
+    } else if (filteredCount === totalCount) {
+        textContainer.textContent = `(${totalCount} total files - filtered by dataset criteria)`;
     } else {
         textContainer.textContent = `(${filteredCount} of ${totalCount} files match filters)`;
     }
