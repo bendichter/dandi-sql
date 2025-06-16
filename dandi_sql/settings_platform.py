@@ -6,6 +6,7 @@ from .settings import *
 import os
 import dj_database_url
 from decouple import config
+import logging.config
 
 # Platform deployment settings
 DEBUG = config('DEBUG', default=False, cast=bool)
@@ -46,22 +47,26 @@ MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=False, cast=bool)
 
-# Simple logging for Railway - no file logging, just console
+# Completely disable all logging to avoid file handler issues
+import logging
 import sys
 
-LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': True,
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-            'stream': sys.stdout,
-        },
-    },
-    'root': {
-        'handlers': ['console'],
-    },
-}
+# Configure basic logging to stdout before Django tries to configure anything
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(levelname)s %(name)s: %(message)s',
+    stream=sys.stdout,
+    force=True
+)
 
-# Disable Django's default logging
+# Disable Django's logging configuration entirely
 LOGGING_CONFIG = None
+LOGGING = {}
+
+# Override any existing logging configuration
+def null_configure_logging(*args, **kwargs):
+    pass
+
+# Monkey patch Django's logging configuration
+import django.utils.log
+django.utils.log.configure_logging = null_configure_logging
