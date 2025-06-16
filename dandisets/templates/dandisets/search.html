@@ -36,7 +36,7 @@
                         <select class="form-select" id="species" name="species" multiple size="4">
                             {% for species in filter_options.species %}
                                 <option value="{{ species.id }}" 
-                                        {% if species.id|stringformat:"s" in current_filters.species %}selected{% endif %}>
+                                        {% if species.id|stringformat:"s" in current_filters.species or species.name in current_filters.species %}selected{% endif %}>
                                     {{ species.name }}
                                 </option>
                             {% endfor %}
@@ -52,7 +52,7 @@
                         <select class="form-select" id="anatomy" name="anatomy" multiple size="4">
                             {% for anatomy in filter_options.anatomy %}
                                 <option value="{{ anatomy.id }}" 
-                                        {% if anatomy.id|stringformat:"s" in current_filters.anatomy %}selected{% endif %}>
+                                        {% if anatomy.id|stringformat:"s" in current_filters.anatomy or anatomy.name in current_filters.anatomy %}selected{% endif %}>
                                     {{ anatomy.name }}
                                 </option>
                             {% endfor %}
@@ -70,7 +70,7 @@
                         <select class="form-select" id="approach" name="approach" multiple size="4">
                             {% for approach in filter_options.approaches %}
                                 <option value="{{ approach.id }}" 
-                                        {% if approach.id|stringformat:"s" in current_filters.approach %}selected{% endif %}>
+                                        {% if approach.id|stringformat:"s" in current_filters.approach or approach.name in current_filters.approach %}selected{% endif %}>
                                     {{ approach.name }}
                                 </option>
                             {% endfor %}
@@ -86,7 +86,7 @@
                         <select class="form-select" id="measurement_technique" name="measurement_technique" multiple size="4">
                             {% for technique in filter_options.measurement_techniques %}
                                 <option value="{{ technique.id }}" 
-                                        {% if technique.id|stringformat:"s" in current_filters.measurement_technique %}selected{% endif %}>
+                                        {% if technique.id|stringformat:"s" in current_filters.measurement_technique or technique.name in current_filters.measurement_technique %}selected{% endif %}>
                                     {{ technique.name }}
                                 </option>
                             {% endfor %}
@@ -134,7 +134,7 @@
                         <select class="form-select" id="data_standards" name="data_standards" multiple size="4">
                             {% for standard in filter_options.data_standards %}
                                 <option value="{{ standard.id }}" 
-                                        {% if standard.id|stringformat:"s" in current_filters.data_standards %}selected{% endif %}>
+                                        {% if standard.id|stringformat:"s" in current_filters.data_standards or standard.name in current_filters.data_standards %}selected{% endif %}>
                                     {{ standard.name }}
                                 </option>
                             {% endfor %}
@@ -580,7 +580,7 @@
                 <ul class="pagination justify-content-center">
                     {% if page_obj.has_previous %}
                         <li class="page-item">
-                            <a class="page-link" href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ page_obj.previous_page_number }}">
+                            <a class="page-link" href="?{% for key, value in request.GET.items %}{% if key != 'page' and value %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ page_obj.previous_page_number }}">
                                 Previous
                             </a>
                         </li>
@@ -593,7 +593,7 @@
                             </li>
                         {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
                             <li class="page-item">
-                                <a class="page-link" href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ num }}">
+                                <a class="page-link" href="?{% for key, value in request.GET.items %}{% if key != 'page' and value %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ num }}">
                                     {{ num }}
                                 </a>
                             </li>
@@ -602,7 +602,7 @@
                     
                     {% if page_obj.has_next %}
                         <li class="page-item">
-                            <a class="page-link" href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ page_obj.next_page_number }}">
+                            <a class="page-link" href="?{% for key, value in request.GET.items %}{% if key != 'page' and value %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ page_obj.next_page_number }}">
                                 Next
                             </a>
                         </li>
@@ -650,16 +650,60 @@
 
 {% block extra_js %}
 <script>
+// Function to build clean URL with only non-empty parameters
+function buildCleanUrl(form) {
+    const params = new URLSearchParams();
+    
+    // Get all form elements
+    const elements = form.querySelectorAll('input, select');
+    
+    elements.forEach(element => {
+        if (!element.name) return; // Skip elements without names
+        
+        if (element.type === 'text' || element.type === 'number' || element.type === 'date') {
+            // For regular inputs, check if value is not empty
+            if (element.value && element.value.trim() !== '') {
+                params.append(element.name, element.value.trim());
+            }
+        } else if (element.tagName.toLowerCase() === 'select' && element.multiple) {
+            // For multi-select elements, add each selected option using the display text
+            const selectedOptions = Array.from(element.selectedOptions);
+            selectedOptions.forEach(option => {
+                if (option.value) {
+                    params.append(element.name, option.textContent.trim());
+                }
+            });
+        } else if (element.tagName.toLowerCase() === 'select') {
+            // For single select elements, use the display text
+            if (element.value && element.value.trim() !== '') {
+                const selectedOption = element.options[element.selectedIndex];
+                params.append(element.name, selectedOption.textContent.trim());
+            }
+        }
+    });
+    
+    const queryString = params.toString();
+    return window.location.pathname + (queryString ? '?' + queryString : '');
+}
+
 // Auto-submit form when filters change
 document.addEventListener('DOMContentLoaded', function() {
     const form = document.getElementById('searchForm');
     const selects = form.querySelectorAll('select[multiple]');
     
+    // Handle form submission
+    form.addEventListener('submit', function(e) {
+        e.preventDefault(); // Prevent default form submission
+        const cleanUrl = buildCleanUrl(form);
+        window.location.href = cleanUrl;
+    });
+    
     selects.forEach(select => {
         select.addEventListener('change', function() {
             // Add a small delay to allow multiple selections
             setTimeout(() => {
-                form.submit();
+                const cleanUrl = buildCleanUrl(form);
+                window.location.href = cleanUrl;
             }, 100);
         });
     });

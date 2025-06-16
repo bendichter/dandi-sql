@@ -30,46 +30,111 @@ def search_dandisets(request):
         )
         filters['search'] = search_query
     
-    # Species filter - using exists() to work around OneToOneField issues
-    species_ids = request.GET.getlist('species')
-    if species_ids:
-        from ..models import AssetsSummarySpecies
-        dandisets = dandisets.filter(
-            assets_summary__in=AssetsSummarySpecies.objects.filter(
-                species__id__in=species_ids
-            ).values_list('assets_summary', flat=True)
-        ).distinct()
-        filters['species'] = species_ids
+    # Species filter - handle both IDs and names
+    species_params = request.GET.getlist('species')
+    if species_params:
+        from ..models import AssetsSummarySpecies, SpeciesType
+        # Try to get species by name first, fall back to ID if numeric
+        species_ids = []
+        for param in species_params:
+            try:
+                # Try as ID first
+                if param.isdigit():
+                    species_ids.append(int(param))
+                else:
+                    # Try as name
+                    species = SpeciesType.objects.filter(name=param).first()
+                    if species:
+                        species_ids.append(species.id)
+            except (ValueError, TypeError):
+                continue
+        
+        if species_ids:
+            dandisets = dandisets.filter(
+                assets_summary__in=AssetsSummarySpecies.objects.filter(
+                    species__id__in=species_ids
+                ).values_list('assets_summary', flat=True)
+            ).distinct()
+            filters['species'] = species_params
     
-    # Anatomy filter - using Django's default reverse lookups  
-    anatomy_ids = request.GET.getlist('anatomy')
-    if anatomy_ids:
-        dandisets = dandisets.filter(
-            about__anatomy__id__in=anatomy_ids
-        ).distinct()
-        filters['anatomy'] = anatomy_ids
+    # Anatomy filter - handle both IDs and names
+    anatomy_params = request.GET.getlist('anatomy')
+    if anatomy_params:
+        from ..models import Anatomy
+        # Try to get anatomy by name first, fall back to ID if numeric
+        anatomy_ids = []
+        for param in anatomy_params:
+            try:
+                # Try as ID first
+                if param.isdigit():
+                    anatomy_ids.append(int(param))
+                else:
+                    # Try as name
+                    anatomy = Anatomy.objects.filter(name=param).first()
+                    if anatomy:
+                        anatomy_ids.append(anatomy.id)
+            except (ValueError, TypeError):
+                continue
+        
+        if anatomy_ids:
+            dandisets = dandisets.filter(
+                about__anatomy__id__in=anatomy_ids
+            ).distinct()
+            filters['anatomy'] = anatomy_params
     
-    # Approach filter - using exists() to work around OneToOneField issues
-    approach_ids = request.GET.getlist('approach')
-    if approach_ids:
-        from ..models import AssetsSummaryApproach
-        dandisets = dandisets.filter(
-            assets_summary__in=AssetsSummaryApproach.objects.filter(
-                approach__id__in=approach_ids
-            ).values_list('assets_summary', flat=True)
-        ).distinct()
-        filters['approach'] = approach_ids
+    # Approach filter - handle both IDs and names
+    approach_params = request.GET.getlist('approach')
+    if approach_params:
+        from ..models import AssetsSummaryApproach, ApproachType
+        # Try to get approach by name first, fall back to ID if numeric
+        approach_ids = []
+        for param in approach_params:
+            try:
+                # Try as ID first
+                if param.isdigit():
+                    approach_ids.append(int(param))
+                else:
+                    # Try as name
+                    approach = ApproachType.objects.filter(name=param).first()
+                    if approach:
+                        approach_ids.append(approach.id)
+            except (ValueError, TypeError):
+                continue
+        
+        if approach_ids:
+            dandisets = dandisets.filter(
+                assets_summary__in=AssetsSummaryApproach.objects.filter(
+                    approach__id__in=approach_ids
+                ).values_list('assets_summary', flat=True)
+            ).distinct()
+            filters['approach'] = approach_params
     
-    # Measurement technique filter - using exists() to work around OneToOneField issues
-    technique_ids = request.GET.getlist('measurement_technique')
-    if technique_ids:
-        from ..models import AssetsSummaryMeasurementTechnique
-        dandisets = dandisets.filter(
-            assets_summary__in=AssetsSummaryMeasurementTechnique.objects.filter(
-                measurement_technique__id__in=technique_ids
-            ).values_list('assets_summary', flat=True)
-        ).distinct()
-        filters['measurement_technique'] = technique_ids
+    # Measurement technique filter - handle both IDs and names
+    technique_params = request.GET.getlist('measurement_technique')
+    if technique_params:
+        from ..models import AssetsSummaryMeasurementTechnique, MeasurementTechniqueType
+        # Try to get technique by name first, fall back to ID if numeric
+        technique_ids = []
+        for param in technique_params:
+            try:
+                # Try as ID first
+                if param.isdigit():
+                    technique_ids.append(int(param))
+                else:
+                    # Try as name
+                    technique = MeasurementTechniqueType.objects.filter(name=param).first()
+                    if technique:
+                        technique_ids.append(technique.id)
+            except (ValueError, TypeError):
+                continue
+        
+        if technique_ids:
+            dandisets = dandisets.filter(
+                assets_summary__in=AssetsSummaryMeasurementTechnique.objects.filter(
+                    measurement_technique__id__in=technique_ids
+                ).values_list('assets_summary', flat=True)
+            ).distinct()
+            filters['measurement_technique'] = technique_params
     
     # Number of subjects filter
     min_subjects = request.GET.get('min_subjects')
@@ -180,16 +245,32 @@ def search_dandisets(request):
         dandisets = dandisets.filter(variable_queries).distinct()
         filters['variables_measured'] = variables_measured
     
-    # Data standards filter - using exists() to work around OneToOneField issues
-    data_standards = request.GET.getlist('data_standards')
-    if data_standards:
-        from ..models import AssetsSummaryDataStandard
-        dandisets = dandisets.filter(
-            assets_summary__in=AssetsSummaryDataStandard.objects.filter(
-                data_standard__id__in=data_standards
-            ).values_list('assets_summary', flat=True)
-        ).distinct()
-        filters['data_standards'] = data_standards
+    # Data standards filter - handle both IDs and names
+    data_standards_params = request.GET.getlist('data_standards')
+    if data_standards_params:
+        from ..models import AssetsSummaryDataStandard, StandardsType
+        # Try to get data standard by name first, fall back to ID if numeric
+        data_standard_ids = []
+        for param in data_standards_params:
+            try:
+                # Try as ID first
+                if param.isdigit():
+                    data_standard_ids.append(int(param))
+                else:
+                    # Try as name
+                    data_standard = StandardsType.objects.filter(name=param).first()
+                    if data_standard:
+                        data_standard_ids.append(data_standard.id)
+            except (ValueError, TypeError):
+                continue
+        
+        if data_standard_ids:
+            dandisets = dandisets.filter(
+                assets_summary__in=AssetsSummaryDataStandard.objects.filter(
+                    data_standard__id__in=data_standard_ids
+                ).values_list('assets_summary', flat=True)
+            ).distinct()
+            filters['data_standards'] = data_standards_params
     
     # Asset-specific filters
     asset_path_search = request.GET.get('asset_path', '').strip()
