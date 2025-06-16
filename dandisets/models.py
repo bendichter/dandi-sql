@@ -410,6 +410,12 @@ class Dandiset(models.Model):
     published_by = models.ForeignKey(Activity, on_delete=models.SET_NULL, blank=True, null=True, 
                                    limit_choices_to={'schema_key': 'PublishActivity'})
     
+    # Sync tracking
+    created_by_sync = models.ForeignKey('SyncTracker', on_delete=models.SET_NULL, blank=True, null=True,
+                                      related_name='dandisets_created', help_text="Sync operation that created this dandiset")
+    last_modified_by_sync = models.ForeignKey('SyncTracker', on_delete=models.SET_NULL, blank=True, null=True,
+                                            related_name='dandisets_modified', help_text="Last sync operation that modified this dandiset")
+    
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -574,6 +580,12 @@ class Asset(models.Model):
     published_by = models.ForeignKey(Activity, on_delete=models.SET_NULL, blank=True, null=True,
                                    limit_choices_to={'schema_key': 'PublishActivity'})
     
+    # Sync tracking
+    created_by_sync = models.ForeignKey('SyncTracker', on_delete=models.SET_NULL, blank=True, null=True,
+                                      related_name='assets_created', help_text="Sync operation that created this asset")
+    last_modified_by_sync = models.ForeignKey('SyncTracker', on_delete=models.SET_NULL, blank=True, null=True,
+                                            related_name='assets_modified', help_text="Last sync operation that modified this asset")
+    
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -656,18 +668,29 @@ class SyncTracker(models.Model):
         ('assets', 'Assets Only'),
     ]
     
+    STATUS_CHOICES = [
+        ('running', 'Running'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+        ('cancelled', 'Cancelled'),
+    ]
+    
     sync_type = models.CharField(max_length=20, choices=SYNC_TYPE_CHOICES, default='full')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='completed', help_text="Status of the sync operation")
     last_sync_timestamp = models.DateTimeField(help_text="When the last sync was completed")
     dandisets_synced = models.IntegerField(default=0, help_text="Number of dandisets synced")
     assets_synced = models.IntegerField(default=0, help_text="Number of assets synced")
     dandisets_updated = models.IntegerField(default=0, help_text="Number of dandisets updated")
     assets_updated = models.IntegerField(default=0, help_text="Number of assets updated")
     sync_duration_seconds = models.FloatField(default=0.0, help_text="Duration of sync in seconds")
+    error_message = models.TextField(blank=True, null=True, help_text="Error message if sync failed")
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
         ordering = ['-created_at']
         get_latest_by = 'created_at'
+        verbose_name = "Synchronization Record"
+        verbose_name_plural = "Synchronization Records"
     
     def __str__(self):
-        return f"{self.sync_type} sync at {self.last_sync_timestamp}"
+        return f"{self.sync_type} sync ({self.status}) at {self.last_sync_timestamp}"

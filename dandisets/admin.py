@@ -1,7 +1,13 @@
 from django.contrib import admin
 from django.http import HttpResponseRedirect
-from django.urls import reverse
+from django.urls import reverse, path
 from django.forms.models import BaseInlineFormSet
+from django.contrib import messages
+from django.core.management import call_command
+from django.utils.html import format_html
+from django.template.response import TemplateResponse
+import io
+import sys
 from .models import (
     Dandiset, Contributor, ContactPoint, Affiliation, SpeciesType,
     ApproachType, MeasurementTechniqueType, StandardsType, AssetsSummary,
@@ -13,7 +19,8 @@ from .models import (
     ActivityEquipment, AssetsSummarySpecies, AssetsSummaryApproach,
     AssetsSummaryDataStandard, AssetsSummaryMeasurementTechnique,
     Asset, Participant, AssetDandiset, AssetAccess, AssetApproach, 
-    AssetMeasurementTechnique, AssetWasAttributedTo, AssetWasGeneratedBy
+    AssetMeasurementTechnique, AssetWasAttributedTo, AssetWasGeneratedBy,
+    SyncTracker
 )
 
 
@@ -100,9 +107,10 @@ class AssetsSummaryMeasurementTechniqueInline(ReadOnlyTabularInline):
 @admin.register(Dandiset)
 class DandisetAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     list_display = ['dandi_id', 'name', 'get_asset_count', 'is_latest', 'version', 'date_created', 'date_published']
-    list_filter = ['date_created', 'date_published', 'license', 'is_latest', 'is_draft']
+    list_filter = ['date_created', 'date_published', 'license', 'is_latest', 'is_draft', 'created_by_sync', 'last_modified_by_sync']
     search_fields = ['dandi_id', 'base_id', 'name', 'description', 'keywords']
-    readonly_fields = ['created_at', 'updated_at']
+    readonly_fields = ['created_at', 'updated_at', 'created_by_sync', 'last_modified_by_sync']
+    actions = ['sync_from_dandi_archive']
     
     @admin.display(description='Asset Count', ordering='dandiset_assets__count')
     def get_asset_count(self, obj):
@@ -112,6 +120,58 @@ class DandisetAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     def get_queryset(self, request):
         """Optimize queryset to prefetch asset counts"""
         return super().get_queryset(request).prefetch_related('dandiset_assets')
+    
+    @admin.action(description='Sync all dandisets from DANDI archive')
+    def sync_from_dandi_archive(self, request, queryset):
+        """Sync dandiset metadata and assets from the DANDI archive.
+        
+        Performs incremental sync of all dandisets from the DANDI archive.
+        Selection is ignored - always syncs all dandisets.
+        """
+        # Note: We ignore the queryset parameter since this action works on all data
+        output = io.StringIO()
+        
+        try:
+            # Always perform incremental sync of all dandisets
+            call_command(
+                'sync_dandi_incremental',
+                verbose=True,
+                no_progress=True,
+                stdout=output
+            )
+            
+            output_text = output.getvalue()
+            if output_text:
+                # Extract summary statistics from output
+                lines = output_text.split('\n')
+                summary_lines = []
+                in_summary = False
+                
+                for line in lines:
+                    if 'SYNC SUMMARY' in line:
+                        in_summary = True
+                    elif in_summary and line.strip():
+                        summary_lines.append(line.strip())
+                    elif in_summary and not line.strip():
+                        break
+                
+                if summary_lines:
+                    messages.success(
+                        request,
+                        format_html(
+                            "Successfully synced all dandisets from DANDI archive:<br/><pre>{}</pre>",
+                            '\n'.join(summary_lines[:8])  # Show first 8 lines of summary
+                        )
+                    )
+                else:
+                    messages.success(request, "Successfully synced all dandisets from DANDI archive")
+            else:
+                messages.success(request, "Successfully synced all dandisets from DANDI archive")
+                
+        except Exception as e:
+            messages.error(request, f"Error syncing from DANDI archive: {str(e)}")
+        finally:
+            output.close()
     
     inlines = [
         DandisetAssetsInline,
@@ -139,6 +199,10 @@ class DandisetAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
         }),
         ('Relationships', {
             'fields': ('assets_summary', 'published_by')
+        }),
+        ('Sync Tracking', {
+            'fields': ('created_by_sync', 'last_modified_by_sync'),
+            'classes': ('collapse',)
         }),
         ('Timestamps', {
             'fields': ('created_at', 'updated_at'),
@@ -265,9 +329,9 @@ class AssetDandisetInline(ReadOnlyTabularInline):
 @admin.register(Asset)
 class AssetAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     list_display = ['dandi_asset_id', 'path', 'get_dandisets', 'content_size', 'encoding_format', 'date_published']
-    list_filter = ['encoding_format', 'date_published']
+    list_filter = ['encoding_format', 'date_published', 'created_by_sync', 'last_modified_by_sync']
     search_fields = ['dandi_asset_id', 'path', 'identifier']
-    readonly_fields = ['created_at', 'updated_at']
+    readonly_fields = ['created_at', 'updated_at', 'created_by_sync', 'last_modified_by_sync']
     
     @admin.display(description='Dandisets')
     def get_dandisets(self, obj):
@@ -302,6 +366,10 @@ class AssetAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
         ('Relationships', {
             'fields': ('published_by',)
         }),
+        ('Sync Tracking', {
+            'fields': ('created_by_sync', 'last_modified_by_sync'),
+            'classes': ('collapse',)
+        }),
         ('Timestamps', {
             'fields': ('created_at', 'updated_at'),
             'classes': ('collapse',)
@@ -323,6 +391,158 @@ class ParticipantAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     search_fields = ['identifier']
 
 
+@admin.register(SyncTracker)
+class SyncTrackerAdmin(admin.ModelAdmin):
+    list_display = [
+        'last_sync_timestamp', 
+        'sync_type', 
+        'status',
+        'get_duration_display',
+        'dandisets_updated', 
+        'assets_updated',
+        'get_efficiency_display'
+    ]
+    list_filter = ['sync_type', 'status', 'last_sync_timestamp']
+    readonly_fields = [
+        'sync_type', 
+        'status',
+        'last_sync_timestamp', 
+        'dandisets_synced', 
+        'assets_synced',
+        'dandisets_updated', 
+        'assets_updated', 
+        'sync_duration_seconds',
+        'error_message',
+        'created_at',
+        'get_duration_display',
+        'get_efficiency_display'
+    ]
+    ordering = ['-created_at']
+    
+    # Override the read-only permissions but keep them for individual records
+    def has_add_permission(self, request):
+        return False
+    
+    def has_change_permission(self, request, obj=None):
+        return False
+    
+    def has_delete_permission(self, request, obj=None):
+        return False
+    
+    @admin.display(description='Duration', ordering='sync_duration_seconds')
+    def get_duration_display(self, obj):
+        """Display sync duration in a human-readable format"""
+        seconds = obj.sync_duration_seconds
+        if seconds < 60:
+            return f"{seconds:.1f} seconds"
+        elif seconds < 3600:
+            return f"{seconds/60:.1f} minutes"
+        else:
+            return f"{seconds/3600:.1f} hours"
+    
+    @admin.display(description='Efficiency')
+    def get_efficiency_display(self, obj):
+        """Display sync efficiency metrics"""
+        if obj.sync_duration_seconds > 0:
+            total_items = obj.dandisets_synced + obj.assets_synced
+            if total_items > 0:
+                items_per_second = total_items / obj.sync_duration_seconds
+                return f"{items_per_second:.1f} items/sec"
+        return "N/A"
+    
+    def get_urls(self):
+        """Add custom URLs for the sync functionality"""
+        urls = super().get_urls()
+        custom_urls = [
+            path('sync/', self.admin_site.admin_view(self.sync_view), name='%s_%s_sync' % (self.model._meta.app_label, self.model._meta.model_name)),
+        ]
+        return custom_urls + urls
+    
+    def sync_view(self, request):
+        """Custom view to handle sync without requiring item selection"""
+        if request.method == 'POST':
+            output = io.StringIO()
+            
+            try:
+                # Always perform incremental sync of all dandisets
+                call_command(
+                    'sync_dandi_incremental',
+                    verbose=True,
+                    no_progress=True,
+                    stdout=output
+                )
+                
+                output_text = output.getvalue()
+                if output_text:
+                    # Extract summary statistics from output
+                    lines = output_text.split('\n')
+                    summary_lines = []
+                    in_summary = False
+                    
+                    for line in lines:
+                        if 'SYNC SUMMARY' in line:
+                            in_summary = True
+                        elif in_summary and line.strip():
+                            summary_lines.append(line.strip())
+                        elif in_summary and not line.strip():
+                            break
+                    
+                    if summary_lines:
+                        messages.success(
+                            request,
+                            format_html(
+                                "Successfully synced all dandisets from DANDI archive:<br/><pre>{}</pre>",
+                                '\n'.join(summary_lines[:8])  # Show first 8 lines of summary
+                            )
+                        )
+                    else:
+                        messages.success(request, "Successfully synced all dandisets from DANDI archive")
+                else:
+                    messages.success(request, "Successfully synced all dandisets from DANDI archive")
+                    
+            except Exception as e:
+                messages.error(request, f"Error syncing from DANDI archive: {str(e)}")
+            finally:
+                output.close()
+                
+            # Redirect back to the changelist
+            return HttpResponseRedirect(reverse('admin:dandisets_synctracker_changelist'))
+        
+        # For GET requests, show confirmation page
+        context = {
+            'title': 'Sync from DANDI Archive',
+            'opts': self.model._meta,
+            'has_permission': True,
+            'app_label': self.model._meta.app_label,
+        }
+        return TemplateResponse(request, 'admin/dandisets/synctracker/sync_confirm.html', context)
+    
+    change_list_template = 'admin/dandisets/synctracker/change_list.html'
+    
+    fieldsets = (
+        ('Sync Information', {
+            'fields': ('sync_type', 'status', 'last_sync_timestamp', 'created_at')
+        }),
+        ('Statistics', {
+            'fields': (
+                ('dandisets_synced', 'dandisets_updated'),
+                ('assets_synced', 'assets_updated'),
+            )
+        }),
+        ('Performance', {
+            'fields': (
+                'sync_duration_seconds',
+                'get_duration_display',
+                'get_efficiency_display'
+            )
+        }),
+        ('Error Information', {
+            'fields': ('error_message',),
+            'classes': ('collapse',)
+        }),
+    )
+
+
 # Register other supporting models
 admin.site.register(Affiliation)
 admin.site.register(Software)
@@ -335,7 +555,82 @@ admin.site.register(StrainType)
 admin.site.register(SexType)
 
 
-# Customize admin site headers
+# Create a custom admin site for better organization
+class DandiAdminSite(admin.AdminSite):
+    site_header = "DANDI SQL Database Administration"
+    site_title = "DANDI SQL Admin"
+    index_title = "Welcome to DANDI SQL Database Administration"
+    
+    def index(self, request, extra_context=None):
+        """Custom index page that groups models by category"""
+        extra_context = extra_context or {}
+        
+        # Custom groupings for the admin index
+        extra_context['sync_models'] = [
+            ('dandisets', 'SyncTracker'),
+        ]
+        extra_context['data_models'] = [
+            ('dandisets', 'Dandiset'),
+            ('dandisets', 'Asset'),
+            ('dandisets', 'AssetDandiset'),
+            ('dandisets', 'Participant'),
+        ]
+        extra_context['metadata_models'] = [
+            ('dandisets', 'Contributor'),
+            ('dandisets', 'AssetsSummary'),
+            ('dandisets', 'Activity'),
+            ('dandisets', 'ContactPoint'),
+            ('dandisets', 'AccessRequirements'),
+            ('dandisets', 'Resource'),
+        ]
+        extra_context['taxonomy_models'] = [
+            ('dandisets', 'SpeciesType'),
+            ('dandisets', 'ApproachType'),
+            ('dandisets', 'MeasurementTechniqueType'),
+            ('dandisets', 'StandardsType'),
+            ('dandisets', 'Anatomy'),
+            ('dandisets', 'Disorder'),
+            ('dandisets', 'GenericType'),
+        ]
+        
+        return super().index(request, extra_context)
+
+
+# Create the custom admin site instance
+admin_site = DandiAdminSite(name='dandi_admin')
+
+# Re-register all models with the custom admin site
+admin_site.register(Dandiset, DandisetAdmin)
+admin_site.register(SyncTracker, SyncTrackerAdmin)
+admin_site.register(Asset, AssetAdmin)
+admin_site.register(AssetDandiset, AssetDandisetAdmin)
+admin_site.register(Participant, ParticipantAdmin)
+admin_site.register(Contributor, ContributorAdmin)
+admin_site.register(AssetsSummary, AssetsSummaryAdmin)
+admin_site.register(Activity, ActivityAdmin)
+admin_site.register(ContactPoint, ContactPointAdmin)
+admin_site.register(AccessRequirements, AccessRequirementsAdmin)
+admin_site.register(Resource, ResourceAdmin)
+admin_site.register(SpeciesType, SpeciesTypeAdmin)
+admin_site.register(ApproachType, ApproachTypeAdmin)
+admin_site.register(MeasurementTechniqueType, MeasurementTechniqueTypeAdmin)
+admin_site.register(StandardsType, StandardsTypeAdmin)
+admin_site.register(Anatomy, AnatomyAdmin)
+admin_site.register(Disorder, DisorderAdmin)
+admin_site.register(GenericType, GenericTypeAdmin)
+
+# Register other supporting models
+admin_site.register(Affiliation)
+admin_site.register(Software)
+admin_site.register(Agent)
+admin_site.register(Equipment)
+admin_site.register(EthicsApproval)
+admin_site.register(AssayType)
+admin_site.register(SampleType)
+admin_site.register(StrainType)
+admin_site.register(SexType)
+
+# Keep the default admin site as well for compatibility
 admin.site.site_header = "DANDI SQL Database Administration"
 admin.site.site_title = "DANDI SQL Admin"
 admin.site.index_title = "Welcome to DANDI SQL Database Administration"

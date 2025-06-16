@@ -112,6 +112,7 @@ class Command(BaseCommand):
         self.no_progress = options['no_progress']
         
         start_time = time.time()
+        sync_tracker = None
         
         try:
             # Initialize DANDI client
@@ -129,21 +130,39 @@ class Command(BaseCommand):
             
             if self.dry_run:
                 self.stdout.write(self.style.WARNING("DRY RUN MODE - No changes will be made"))
+            else:
+                # Create sync tracker with 'running' status
+                sync_tracker = SyncTracker.objects.create(
+                    sync_type=sync_scope,
+                    status='running',
+                    last_sync_timestamp=datetime.now(timezone.utc),
+                    dandisets_synced=0,
+                    assets_synced=0,
+                    dandisets_updated=0,
+                    assets_updated=0,
+                    sync_duration_seconds=0.0
+                )
             
             # Perform unified sync - iterate through dandisets and handle both metadata and assets
-            self._sync_dandisets_and_assets(last_sync_time, options, sync_scope)
+            self._sync_dandisets_and_assets(last_sync_time, options, sync_scope, sync_tracker)
             
             # Record sync completion
             end_time = time.time()
             duration = end_time - start_time
             
-            if not self.dry_run:
-                self._record_sync_completion(sync_scope, duration)
+            if not self.dry_run and sync_tracker:
+                self._record_sync_completion(sync_tracker, duration)
             
             # Print summary
             self._print_summary(duration)
             
         except Exception as e:
+            # Record failure if sync tracker exists
+            if not self.dry_run and sync_tracker:
+                end_time = time.time()
+                duration = end_time - start_time
+                self._record_sync_failure(sync_tracker, duration, str(e))
+            
             self.stdout.write(
                 self.style.ERROR(f'Error during sync: {str(e)}')
             )
@@ -185,7 +204,7 @@ class Command(BaseCommand):
         except SyncTracker.DoesNotExist:
             return None
 
-    def _sync_dandisets_and_assets(self, last_sync_time, options, sync_scope):
+    def _sync_dandisets_and_assets(self, last_sync_time, options, sync_scope, sync_tracker=None):
         """Unified sync method that iterates through dandisets and handles both metadata and assets"""
         self.stdout.write("Fetching dandisets from DANDI API...")
         
@@ -235,14 +254,14 @@ class Command(BaseCommand):
         process_desc = "Processing dandisets and assets"
         if self.no_progress:
             for api_dandiset in dandisets_to_process:
-                self._process_dandiset_and_assets(api_dandiset, last_sync_time, options, sync_scope)
+                self._process_dandiset_and_assets(api_dandiset, last_sync_time, options, sync_scope, sync_tracker)
         else:
             with tqdm(dandisets_to_process, desc=process_desc, unit="dandiset") as pbar:
                 for api_dandiset in pbar:
                     pbar.set_postfix(current=api_dandiset.identifier)
-                    self._process_dandiset_and_assets(api_dandiset, last_sync_time, options, sync_scope)
+                    self._process_dandiset_and_assets(api_dandiset, last_sync_time, options, sync_scope, sync_tracker)
 
-    def _process_dandiset_and_assets(self, api_dandiset, last_sync_time, options, sync_scope):
+    def _process_dandiset_and_assets(self, api_dandiset, last_sync_time, options, sync_scope, sync_tracker=None):
         """Process a single dandiset: update metadata and then process its assets"""
         try:
             dandiset = None
@@ -256,7 +275,7 @@ class Command(BaseCommand):
                 else:
                     with transaction.atomic():
                         metadata = api_dandiset.get_raw_metadata()
-                        dandiset = self._load_dandiset(metadata)
+                        dandiset = self._load_dandiset(metadata, sync_tracker)
                         self.stats['dandisets_updated'] += 1
                         if self.verbose:
                             self.stdout.write(f"Updated dandiset: {api_dandiset.identifier}")
@@ -677,7 +696,7 @@ class Command(BaseCommand):
                 self.stdout.write(f"Error checking asset: {e}")
             return True  # Assume needs update on error
 
-    def _update_asset(self, api_asset, dandiset):
+    def _update_asset(self, api_asset, dandiset, sync_tracker=None):
         """Update a single asset"""
         try:
             if self.dry_run:
@@ -689,7 +708,7 @@ class Command(BaseCommand):
             
             with transaction.atomic():
                 metadata = api_asset.get_raw_metadata()
-                self._load_asset(metadata, dandiset)
+                self._load_asset(metadata, dandiset, sync_tracker)
                 self.stats['assets_updated'] += 1
                 
         except Exception as e:
@@ -698,17 +717,28 @@ class Command(BaseCommand):
                 asset_path = getattr(api_asset, 'path', 'unknown')
                 self.stdout.write(f"Error updating asset {asset_path}: {e}")
 
-    def _record_sync_completion(self, sync_scope, duration):
+    def _record_sync_completion(self, sync_tracker, duration):
         """Record sync completion in database"""
-        SyncTracker.objects.create(
-            sync_type=sync_scope,
-            last_sync_timestamp=datetime.now(timezone.utc),
-            dandisets_synced=self.stats['dandisets_checked'],
-            assets_synced=self.stats['assets_checked'],
-            dandisets_updated=self.stats['dandisets_updated'],
-            assets_updated=self.stats['assets_updated'],
-            sync_duration_seconds=duration
-        )
+        sync_tracker.status = 'completed'
+        sync_tracker.last_sync_timestamp = datetime.now(timezone.utc)
+        sync_tracker.dandisets_synced = self.stats['dandisets_checked']
+        sync_tracker.assets_synced = self.stats['assets_checked']
+        sync_tracker.dandisets_updated = self.stats['dandisets_updated']
+        sync_tracker.assets_updated = self.stats['assets_updated']
+        sync_tracker.sync_duration_seconds = duration
+        sync_tracker.save()
+
+    def _record_sync_failure(self, sync_tracker, duration, error_message):
+        """Record sync failure in database"""
+        sync_tracker.status = 'failed'
+        sync_tracker.last_sync_timestamp = datetime.now(timezone.utc)
+        sync_tracker.dandisets_synced = self.stats['dandisets_checked']
+        sync_tracker.assets_synced = self.stats['assets_checked']
+        sync_tracker.dandisets_updated = self.stats['dandisets_updated']
+        sync_tracker.assets_updated = self.stats['assets_updated']
+        sync_tracker.sync_duration_seconds = duration
+        sync_tracker.error_message = error_message[:1000] if error_message else ''  # Truncate if too long
+        sync_tracker.save()
 
     def _print_summary(self, duration):
         """Print sync summary"""
@@ -728,7 +758,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS("Sync completed successfully"))
 
     # Include all the helper methods from load_sample_data.py for loading data
-    def _load_dandiset(self, data):
+    def _load_dandiset(self, data, sync_tracker=None):
         """Load a single dandiset from JSON data."""
         # Extract version information from the ID
         full_id = data.get('id', '')  # Full ID like "DANDI:000003/0.230629.1955"
@@ -738,6 +768,11 @@ class Command(BaseCommand):
         # Determine if this is a draft (no version)
         is_draft = not bool(version)
         version_order = 0 if is_draft else 1  # Default to 1 for published versions
+        
+        # Prepare sync tracking fields
+        sync_fields = {}
+        if sync_tracker:
+            sync_fields['last_modified_by_sync'] = sync_tracker
         
         # Create or get the dandiset
         dandiset, created = Dandiset.objects.update_or_create(
@@ -766,8 +801,14 @@ class Command(BaseCommand):
                 'protocol': data.get('protocol', []),
                 'acknowledgement': data.get('acknowledgement', ''),
                 'manifest_location': data.get('manifestLocation', []),
+                **sync_fields
             }
         )
+        
+        # Set created_by_sync for new dandisets
+        if created and sync_tracker:
+            dandiset.created_by_sync = sync_tracker
+            dandiset.save()
 
         if self.verbose:
             action = "Created" if created else "Updated"
@@ -827,7 +868,7 @@ class Command(BaseCommand):
                 dandiset.published_by = activity
                 dandiset.save()
 
-    def _load_asset(self, data, dandiset):
+    def _load_asset(self, data, dandiset, sync_tracker=None):
         """Load an asset from JSON data."""
         # Extract asset ID from the full ID
         asset_id = data.get('identifier', '')
@@ -838,6 +879,11 @@ class Command(BaseCommand):
                 asset_id = full_id.split(':', 1)[1]
             else:
                 asset_id = full_id
+
+        # Prepare sync tracking fields
+        sync_fields = {}
+        if sync_tracker:
+            sync_fields['last_modified_by_sync'] = sync_tracker
 
         asset, created = Asset.objects.update_or_create(
             dandi_asset_id=asset_id,
@@ -854,8 +900,14 @@ class Command(BaseCommand):
                 'digest': data.get('digest', {}),
                 'content_url': data.get('contentUrl', []),
                 'variable_measured': data.get('variableMeasured', []),
+                **sync_fields
             }
         )
+        
+        # Set created_by_sync for new assets
+        if created and sync_tracker:
+            asset.created_by_sync = sync_tracker
+            asset.save()
 
         if self.verbose:
             action = "Created" if created else "Updated"
