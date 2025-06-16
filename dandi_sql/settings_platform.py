@@ -46,42 +46,22 @@ MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=False, cast=bool)
 
-# Logging for platforms - console only, no file logging
+# Simple logging for Railway - no file logging, just console
+import sys
+
 LOGGING = {
     'version': 1,
-    'disable_existing_loggers': True,  # Disable any existing loggers
-    'formatters': {
-        'simple': {
-            'format': '[{levelname}] {asctime} {name}: {message}',
-            'style': '{',
-        },
-    },
+    'disable_existing_loggers': True,
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
-            'level': 'INFO',
-            'formatter': 'simple',
+            'stream': sys.stdout,
         },
     },
     'root': {
         'handlers': ['console'],
-        'level': 'INFO',
-    },
-    'loggers': {
-        'django': {
-            'handlers': ['console'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-        'dandisets': {
-            'handlers': ['console'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-        'gunicorn': {
-            'handlers': ['console'],
-            'level': 'INFO',
-            'propagate': False,
-        },
     },
 }
+
+# Disable Django's default logging
+LOGGING_CONFIG = None
