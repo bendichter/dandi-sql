@@ -5,6 +5,58 @@ import requests
 import json
 from django.conf import settings
 from urllib.parse import urlencode
+from datetime import datetime
+
+
+def transform_api_dandiset_for_template(dandiset_data):
+    """Transform API response data to match template expectations"""
+    class MockDandiset:
+        def __init__(self, data):
+            self.id = data.get('id')
+            self.dandi_id = data.get('dandi_id')
+            self.name = data.get('name', '')
+            self.description = data.get('description', '')
+            self.url = data.get('url', '')
+            
+            # Handle date_published
+            date_pub = data.get('date_published')
+            if date_pub:
+                try:
+                    # Parse ISO format date string
+                    if isinstance(date_pub, str):
+                        self.date_published = datetime.fromisoformat(date_pub.replace('Z', '+00:00'))
+                    else:
+                        self.date_published = date_pub
+                except:
+                    self.date_published = None
+            else:
+                self.date_published = None
+            
+            # Create mock assets_summary with the summary data
+            summary = data.get('summary', {})
+            self.assets_summary = MockAssetsSummary(summary)
+            
+            # Create empty sets for related data (these would normally be querysets)
+            self.dandisetabout_set = MockQuerySet([])
+            
+    class MockAssetsSummary:
+        def __init__(self, summary_data):
+            self.number_of_subjects = summary_data.get('subjects')
+            self.number_of_files = summary_data.get('files', 0)
+            self.number_of_bytes = summary_data.get('size_bytes', 0)
+            
+            # Create empty sets for related data
+            self.assetssummaryspecies_set = MockQuerySet([])
+            self.assetssummaryapproach_set = MockQuerySet([])
+    
+    class MockQuerySet:
+        def __init__(self, data):
+            self.data = data
+            
+        def all(self):
+            return self.data
+    
+    return MockDandiset(dandiset_data)
 
 
 def search_dandisets(request):
@@ -64,7 +116,7 @@ def search_dandisets(request):
         
         page_obj = MockPageObj(results, pagination)
         
-        # Calculate asset counts for display
+        # Transform API response data to match template expectations
         dandisets_with_counts = []
         for dandiset_data in results:
             total_assets = dandiset_data.get('summary', {}).get('files', 0)
@@ -75,8 +127,11 @@ def search_dandisets(request):
             else:
                 filtered_assets = total_assets
             
+            # Transform the API response to match what the template expects
+            transformed_dandiset = transform_api_dandiset_for_template(dandiset_data)
+            
             dandisets_with_counts.append({
-                'dandiset': dandiset_data,
+                'dandiset': transformed_dandiset,
                 'total_assets': total_assets,
                 'filtered_assets': filtered_assets,
             })
