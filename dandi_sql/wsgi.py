@@ -11,6 +11,8 @@ import os
 
 from django.core.wsgi import get_wsgi_application
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dandi_sql.settings')
+# Use platform settings for production deployments, default settings otherwise
+default_settings = 'dandi_sql.settings_platform' if os.environ.get('DATABASE_URL') else 'dandi_sql.settings'
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', default_settings)
 
 application = get_wsgi_application()
