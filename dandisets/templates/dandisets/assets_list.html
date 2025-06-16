@@ -20,6 +20,13 @@
                                title="View asset details in DANDI API">
                                 <i class="fas fa-info-circle"></i> Asset Info
                             </a>
+                            <a href="https://api.dandiarchive.org/api/assets/{{ asset.dandi_asset_id }}/download/" 
+                               target="_blank" 
+                               rel="noopener noreferrer"
+                               class="btn btn-sm btn-outline-success me-1"
+                               title="Download asset file">
+                                <i class="fas fa-download"></i> Download
+                            </a>
                         </div>
                     {% endif %}
                 {% endwith %}
