@@ -10,21 +10,20 @@ In your GitHub repository, go to **Settings** → **Secrets and variables** → 
 
 #### Required Secrets:
 
-- **`DATABASE_URL`**: Your Railway PostgreSQL connection string
-  - Get this from Railway dashboard → Your Project → PostgreSQL service → Variables tab
-  - Format: `postgresql://username:password@host:port/database`
+- **`RAILWAY_APP_URL`**: Your Railway app's public URL
+  - Format: `https://your-app-name.railway.app` (without trailing slash)
+  - Get this from Railway dashboard → Your Project → Web Service → Settings
 
-- **`SECRET_KEY`**: Your Django secret key
-  - Generate a new one: `python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"`
-  - Should be the same one used in your Railway deployment
+- **`SYNC_API_TOKEN`**: API token for sync endpoint security
+  - Generate a secure random token: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
+  - This token will be used to authenticate GitHub Actions calls to your sync endpoint
 
-### 2. How to Get DATABASE_URL from Railway
+### 2. Set up the API Token in Railway
 
 1. Go to your Railway project dashboard
-2. Click on your PostgreSQL service
+2. Click on your Web Service
 3. Go to the **Variables** tab
-4. Copy the `DATABASE_URL` value
-5. Add it as a GitHub secret
+4. Add a new variable: `SYNC_API_TOKEN` with the same token value you added to GitHub secrets
 
 ### 3. Verify the Setup
 
@@ -49,8 +48,9 @@ Once secrets are configured:
 
 ### Troubleshooting:
 - **Red X in Actions**: Check the logs for specific errors
-- **Database Connection Errors**: Verify `DATABASE_URL` secret is correct
-- **Django Errors**: Verify `SECRET_KEY` secret matches your Railway deployment
+- **HTTP 401 Unauthorized**: Verify `SYNC_API_TOKEN` matches between GitHub and Railway
+- **HTTP 500 Server Error**: Check Railway app logs for Django errors
+- **Connection Refused**: Verify `RAILWAY_APP_URL` is correct and app is running
 
 ## Cost Considerations
 

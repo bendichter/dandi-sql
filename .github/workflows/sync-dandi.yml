@@ -25,36 +25,33 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-      
-      - name: Install dependencies
+      - name: Call DANDI sync endpoint
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements_production.txt
-      
-      - name: Set up environment variables
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          SECRET_KEY: ${{ secrets.SECRET_KEY }}
-          DEBUG: 'False'
-          ALLOWED_HOSTS: '.railway.app'
-        run: |
-          echo "Environment variables configured"
-      
-      - name: Run DANDI sync
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          SECRET_KEY: ${{ secrets.SECRET_KEY }}
-          DEBUG: 'False'
-          ALLOWED_HOSTS: '.railway.app'
-        run: |
+          FORCE_FULL=""
           if [ "${{ github.event.inputs.force_full_sync }}" = "true" ]; then
-            python manage.py sync_dandi_incremental --settings=dandi_sql.settings_platform --no-progress --verbose --force-full-sync
+            FORCE_FULL="?force_full=true"
+          fi
+          
+          response=$(curl -s -w "\n%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer ${{ secrets.SYNC_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            "${{ secrets.RAILWAY_APP_URL }}/api/sync/trigger/$FORCE_FULL")
+          
+          # Extract HTTP status code and response body
+          http_code=$(echo "$response" | tail -n1)
+          response_body=$(echo "$response" | sed '$d')
+          
+          echo "HTTP Status: $http_code"
+          echo "Response: $response_body"
+          
+          # Check if request was successful
+          if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+            echo "✅ DANDI sync completed successfully"
           else
-            python manage.py sync_dandi_incremental --settings=dandi_sql.settings_platform --no-progress --verbose
+            echo "❌ DANDI sync failed with HTTP $http_code"
+            echo "$response_body"
+            exit 1
           fi
       
       - name: Upload sync logs on failure
