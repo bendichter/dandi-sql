@@ -1,0 +1,74 @@
+name: Sync DANDI Data
+
+on:
+  schedule:
+    # Run daily at 2:00 AM UTC
+    - cron: '0 2 * * *'
+  
+  # Allow manual triggering from GitHub Actions tab
+  workflow_dispatch:
+    inputs:
+      force_full_sync:
+        description: 'Force full sync (ignore last sync timestamp)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+jobs:
+  sync-dandi:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements_production.txt
+      
+      - name: Set up environment variables
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          DEBUG: 'False'
+          ALLOWED_HOSTS: '.railway.app'
+        run: |
+          echo "Environment variables configured"
+      
+      - name: Run DANDI sync
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          DEBUG: 'False'
+          ALLOWED_HOSTS: '.railway.app'
+        run: |
+          if [ "${{ github.event.inputs.force_full_sync }}" = "true" ]; then
+            python manage.py sync_dandi_incremental --settings=dandi_sql.settings_platform --no-progress --verbose --force-full-sync
+          else
+            python manage.py sync_dandi_incremental --settings=dandi_sql.settings_platform --no-progress --verbose
+          fi
+      
+      - name: Upload sync logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: sync-logs
+          path: |
+            *.log
+            /tmp/*.log
+          retention-days: 7
+      
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::DANDI sync failed. Check the logs for details."
+          echo "You can manually trigger a sync from the Django admin interface at your Railway app URL."
