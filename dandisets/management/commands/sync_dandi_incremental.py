@@ -292,14 +292,14 @@ class Command(BaseCommand):
                             self.stdout.write(f"Local dandiset not found for {api_dandiset.identifier}, skipping assets")
                         return
                 
-                self._process_assets_for_dandiset(api_dandiset, dandiset, last_sync_time, options)
+                self._process_assets_for_dandiset(api_dandiset, dandiset, last_sync_time, options, sync_tracker)
                 
         except Exception as e:
             self.stats['errors'] += 1
             if self.verbose:
                 self.stdout.write(f"Error processing dandiset {api_dandiset.identifier}: {e}")
 
-    def _process_assets_for_dandiset(self, api_dandiset, local_dandiset, last_sync_time, options):
+    def _process_assets_for_dandiset(self, api_dandiset, local_dandiset, last_sync_time, options, sync_tracker=None):
         """Process assets for a specific dandiset"""
         try:
             # Get assets from API
@@ -329,7 +329,7 @@ class Command(BaseCommand):
             if self.no_progress:
                 for asset in api_assets:
                     if self._asset_needs_update(asset, last_sync_time):
-                        self._update_asset(asset, local_dandiset)
+                        self._update_asset(asset, local_dandiset, sync_tracker)
                         assets_updated += 1
                     self.stats['assets_checked'] += 1
             else:
@@ -340,7 +340,7 @@ class Command(BaseCommand):
                         asset_pbar.set_postfix(asset=short_path)
                         
                         if self._asset_needs_update(asset, last_sync_time):
-                            self._update_asset(asset, local_dandiset)
+                            self._update_asset(asset, local_dandiset, sync_tracker)
                             assets_updated += 1
                         self.stats['assets_checked'] += 1
             
@@ -513,7 +513,7 @@ class Command(BaseCommand):
                 self.stdout.write(f"Error checking {api_dandiset.identifier}: {e}")
             return False  # On error, be conservative and skip
 
-    def _update_dandiset(self, api_dandiset):
+    def _update_dandiset(self, api_dandiset, sync_tracker=None):
         """Update a single dandiset"""
         try:
             if self.dry_run:
@@ -523,7 +523,7 @@ class Command(BaseCommand):
             
             with transaction.atomic():
                 metadata = api_dandiset.get_raw_metadata()
-                self._load_dandiset(metadata)
+                self._load_dandiset(metadata, sync_tracker)
                 self.stats['dandisets_updated'] += 1
                 
         except Exception as e:
