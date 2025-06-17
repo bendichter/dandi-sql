@@ -818,11 +818,35 @@ class Command(BaseCommand):
         for contributor_data in data.get('contributor', []):
             contributor = self._load_contributor(contributor_data)
             if contributor:
-                # Create the relationship
-                DandisetContributor.objects.get_or_create(
+                # Create the relationship with role information
+                relationship, created = DandisetContributor.objects.get_or_create(
                     dandiset=dandiset,
-                    contributor=contributor
+                    contributor=contributor,
+                    defaults={
+                        'role_name': contributor_data.get('roleName', []),
+                        'include_in_citation': contributor_data.get('includeInCitation', True),
+                    }
                 )
+                
+                # Update existing relationships with new role data if needed
+                if not created:
+                    updated = False
+                    new_roles = contributor_data.get('roleName', [])
+                    if new_roles and new_roles != relationship.role_name:
+                        # Merge roles - keep existing and add new ones
+                        existing_roles = set(relationship.role_name) if relationship.role_name else set()
+                        new_role_set = set(new_roles) if isinstance(new_roles, list) else {new_roles}
+                        merged_roles = list(existing_roles | new_role_set)
+                        relationship.role_name = merged_roles
+                        updated = True
+                    
+                    include_in_citation = contributor_data.get('includeInCitation')
+                    if include_in_citation is not None and include_in_citation != relationship.include_in_citation:
+                        relationship.include_in_citation = include_in_citation
+                        updated = True
+                    
+                    if updated:
+                        relationship.save()
 
         # Load about section
         for about_data in data.get('about', []):
@@ -989,18 +1013,56 @@ class Command(BaseCommand):
     def _load_contributor(self, data):
         """Load a contributor from JSON data."""
         try:
-            contributor, created = Contributor.objects.get_or_create(
-                name=data.get('name', ''),
-                defaults={
-                    'email': data.get('email', ''),
-                    'identifier': data.get('identifier', ''),
-                    'schema_key': data.get('schemaKey', ''),
-                    'role_name': data.get('roleName', []),
-                    'include_in_citation': data.get('includeInCitation', False),
-                    'award_number': data.get('awardNumber', ''),
-                    'url': data.get('url', ''),
-                }
-            )
+            name = data.get('name', '')
+            identifier = data.get('identifier', '').strip() if data.get('identifier') else ''
+            
+            # Try to find existing contributor by identifier first (if provided)
+            contributor = None
+            if identifier:
+                # Normalize identifier
+                identifier = self._normalize_contributor_identifier(identifier)
+                
+                # Look for existing contributor with this identifier
+                existing_contributors = Contributor.objects.filter(identifier=identifier)
+                if existing_contributors.exists():
+                    contributor = existing_contributors.first()
+                    if self.verbose:
+                        self.stdout.write(f"Found existing contributor by identifier {identifier}: {contributor.name}")
+            
+            # If no contributor found by identifier, try by name
+            if not contributor:
+                contributor, created = Contributor.objects.get_or_create(
+                    name=name,
+                    defaults={
+                        'email': data.get('email', ''),
+                        'identifier': identifier,
+                        'schema_key': data.get('schemaKey', ''),
+                        'award_number': data.get('awardNumber', ''),
+                        'url': data.get('url', ''),
+                    }
+                )
+                if created and self.verbose:
+                    self.stdout.write(f"Created new contributor: {name}")
+            else:
+                # Update existing contributor with any missing information
+                updated = False
+                if not contributor.email and data.get('email'):
+                    contributor.email = data.get('email')
+                    updated = True
+                if not contributor.url and data.get('url'):
+                    contributor.url = data.get('url')
+                    updated = True
+                if not contributor.award_number and data.get('awardNumber'):
+                    contributor.award_number = data.get('awardNumber')
+                    updated = True
+                
+                # Note: Role names are now stored in DandisetContributor relationships,
+                # not on the Contributor model itself
+                
+                if updated:
+                    contributor.save()
+                    if self.verbose:
+                        self.stdout.write(f"Updated existing contributor: {contributor.name}")
 
             # Load affiliations
             for affiliation_data in data.get('affiliation', []):
@@ -1021,6 +1083,39 @@ class Command(BaseCommand):
             if self.verbose:
                 self.stdout.write(f"Error loading contributor: {e}")
             return None
+
+    def _normalize_contributor_identifier(self, identifier):
+        """Normalize contributor identifier format"""
+        if not identifier:
+            return identifier
+            
+        # Remove whitespace
+        identifier = identifier.strip()
+        
+        # Normalize ORCID URLs to standard format
+        if 'orcid.org' in identifier.lower():
+            # Extract ORCID from URL
+            if identifier.startswith('http'):
+                identifier = identifier.split('/')[-1]
+            # Ensure ORCID format
+            if not (identifier.startswith('0000-') or identifier.startswith('0009-')):
+                # Try to format as ORCID if it looks like one
+                if len(identifier) == 16 and identifier.replace('-', '').isdigit():
+                    pass  # Already formatted
+                elif len(identifier) == 16:
+                    # Add dashes if missing
+                    identifier = f"{identifier[:4]}-{identifier[4:8]}-{identifier[8:12]}-{identifier[12:]}"
+        
+        # Normalize ROR URLs to standard format  
+        elif 'ror.org' in identifier.lower():
+            # Extract ROR from URL
+            if identifier.startswith('http'):
+                identifier = identifier.split('/')[-1]
+            # Ensure ROR format starts with https://ror.org/
+            if not identifier.startswith('https://ror.org/'):
+                identifier = f"https://ror.org/{identifier}"
+        
+        return identifier
 
     def _load_about_object(self, data):
         """Load an about object (Anatomy, etc.) from JSON data."""

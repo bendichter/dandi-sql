@@ -213,9 +213,36 @@ class DandisetAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
 
 @admin.register(Contributor)
 class ContributorAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
-    list_display = ['name', 'schema_key', 'email', 'include_in_citation']
-    list_filter = ['schema_key', 'include_in_citation', 'role_name']
+    list_display = ['name', 'schema_key', 'email', 'identifier', 'get_dandiset_count']
+    list_filter = ['schema_key']
     search_fields = ['name', 'email', 'identifier']
+    
+    @admin.display(description='Dandisets Count')
+    def get_dandiset_count(self, obj):
+        """Get the number of dandisets this contributor is associated with"""
+        return obj.dandisetcontributor_set.count()
+    
+    def get_queryset(self, request):
+        """Optimize queryset to prefetch dandiset relationships"""
+        return super().get_queryset(request).prefetch_related('dandisetcontributor_set')
+
+
+@admin.register(DandisetContributor)
+class DandisetContributorAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
+    list_display = ['contributor', 'dandiset', 'get_roles', 'include_in_citation']
+    list_filter = ['include_in_citation', 'dandiset__base_id']
+    search_fields = ['contributor__name', 'contributor__email', 'dandiset__name', 'dandiset__dandi_id']
+    
+    @admin.display(description='Roles')
+    def get_roles(self, obj):
+        """Display roles as comma-separated string"""
+        if obj.role_name:
+            return ', '.join(obj.role_name) if isinstance(obj.role_name, list) else str(obj.role_name)
+        return 'No roles'
+    
+    def get_queryset(self, request):
+        """Optimize queryset with select_related"""
+        return super().get_queryset(request).select_related('contributor', 'dandiset')
 
 
 @admin.register(AssetsSummary)
@@ -606,6 +633,7 @@ admin_site.register(Asset, AssetAdmin)
 admin_site.register(AssetDandiset, AssetDandisetAdmin)
 admin_site.register(Participant, ParticipantAdmin)
 admin_site.register(Contributor, ContributorAdmin)
+admin_site.register(DandisetContributor, DandisetContributorAdmin)
 admin_site.register(AssetsSummary, AssetsSummaryAdmin)
 admin_site.register(Activity, ActivityAdmin)
 admin_site.register(ContactPoint, ContactPointAdmin)

@@ -39,6 +39,29 @@ sudo -u www-data venv/bin/python manage.py sync_dandi_incremental --dandiset-id 
 sudo -u www-data venv/bin/python manage.py sync_dandi_incremental --dry-run --verbose
 ```
 
+## Data Management and Cleanup
+
+```bash
+# Navigate to application directory
+cd /opt/dandi-sql
+
+# Deduplicate contributors by ORCID/ROR ID
+sudo -u www-data venv/bin/python manage.py deduplicate_contributors --verbose
+
+# Dry run to see what would be deduplicated
+sudo -u www-data venv/bin/python manage.py deduplicate_contributors --dry-run --verbose
+
+# Deduplicate only specific contributor types
+sudo -u www-data venv/bin/python manage.py deduplicate_contributors --schema-key Person --verbose
+sudo -u www-data venv/bin/python manage.py deduplicate_contributors --schema-key Organization --verbose
+
+# Normalize anatomy identifiers
+sudo -u www-data venv/bin/python manage.py normalize_anatomy_ids --verbose
+
+# Deduplicate anatomy entries
+sudo -u www-data venv/bin/python manage.py deduplicate_anatomy --verbose
+```
+
 ## Database Management
 
 ```bash

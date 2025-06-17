@@ -107,8 +107,6 @@ class Contributor(models.Model):
     name = models.TextField(blank=True, null=True)
     email = models.EmailField(blank=True, null=True)
     url = models.URLField(blank=True, null=True)
-    role_name = models.JSONField(default=list, blank=True, help_text="Role(s) of the contributor")
-    include_in_citation = models.BooleanField(default=True, help_text="Include contributor in citation")
     award_number = models.TextField(blank=True, null=True, help_text="Identifier associated with a sponsored or gift award")
     schema_key = models.CharField(max_length=20, choices=SCHEMA_KEY_CHOICES, default='Contributor')
     contact_point = models.JSONField(default=list, blank=True, help_text="Organization contact information")
@@ -456,12 +454,20 @@ class Dandiset(models.Model):
 
 
 class DandisetContributor(models.Model):
-    """Many-to-many relationship between dandisets and contributors"""
+    """Many-to-many relationship between dandisets and contributors with role information"""
     dandiset = models.ForeignKey(Dandiset, on_delete=models.CASCADE, related_name='dandiset_contributors')
     contributor = models.ForeignKey(Contributor, on_delete=models.CASCADE)
     
+    # Role-specific fields that vary by dandiset
+    role_name = models.JSONField(default=list, blank=True, help_text="Role(s) of the contributor in this specific dandiset")
+    include_in_citation = models.BooleanField(default=True, help_text="Include contributor in citation for this dandiset")
+    
     class Meta:
         unique_together = ['dandiset', 'contributor']
+    
+    def __str__(self):
+        roles = ', '.join(self.role_name) if self.role_name else 'No roles'
+        return f"{self.contributor.name} - {roles} in {self.dandiset.base_id}"
 
 
 class DandisetAbout(models.Model):
