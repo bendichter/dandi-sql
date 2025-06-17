@@ -1,6 +1,4 @@
 from django.db import models
-from django.contrib.postgres.fields import ArrayField
-import json
 
 
 class BaseType(models.Model):

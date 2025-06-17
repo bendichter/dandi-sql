@@ -6,7 +6,6 @@ from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.core.management import call_command
-from django.conf import settings
 from io import StringIO
 import sys
 

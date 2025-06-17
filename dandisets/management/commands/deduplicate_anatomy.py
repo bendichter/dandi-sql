@@ -1,7 +1,6 @@
 from typing import Optional
 from django.core.management.base import BaseCommand
 from django.db import transaction
-from django.db.models import Count
 from dandisets.models import Anatomy, DandisetAbout
 import re
 

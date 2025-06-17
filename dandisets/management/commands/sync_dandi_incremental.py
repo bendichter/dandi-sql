@@ -3,7 +3,7 @@ import re
 import time
 import requests
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Callable, Iterable, Union, Tuple
+from typing import Optional
 from django.core.management.base import BaseCommand
 from django.utils.dateparse import parse_datetime
 from django.db import transaction, connections
@@ -303,7 +303,7 @@ class Command(BaseCommand):
             return 'full'
 
     def _get_last_sync_time(self, options):
-        """Get the last sync timestamp"""
+        """Get the last sync timestamp - only consider syncs that covered the current scope"""
         if options['force_full_sync']:
             return None
         
@@ -319,9 +319,29 @@ class Command(BaseCommand):
                 except:
                     raise ValueError(f"Invalid date format: {options['since']}")
         
-        # Get last sync from database
+        # Determine what we're trying to sync
+        current_scope = self._determine_sync_scope(options)
+        
+        # Get last sync from database - only consider syncs that covered our current scope
         try:
-            last_sync = SyncTracker.objects.latest()
+            if current_scope == 'assets':
+                # For assets-only sync, look for previous full or assets syncs
+                last_sync = SyncTracker.objects.filter(
+                    sync_type__in=['full', 'assets'],
+                    status='completed'
+                ).latest()
+            elif current_scope == 'dandisets':
+                # For dandisets-only sync, look for previous full or dandisets syncs
+                last_sync = SyncTracker.objects.filter(
+                    sync_type__in=['full', 'dandisets'],
+                    status='completed'
+                ).latest()
+            else:
+                # For full sync, look for any previous completed sync
+                last_sync = SyncTracker.objects.filter(
+                    status='completed'
+                ).latest()
+            
             return last_sync.last_sync_timestamp
         except SyncTracker.DoesNotExist:
             return None
@@ -863,7 +883,7 @@ class Command(BaseCommand):
         # Filter assets that need LINDI processing
         assets_to_process = []
         
-        for asset in nwb_assets:
+        def check_asset_needs_processing(asset):
             needs_processing = False
             
             # Check if force refresh is enabled
@@ -882,6 +902,16 @@ class Command(BaseCommand):
                 assets_to_process.append(asset)
             else:
                 self.stats['lindi_skipped'] += 1
+        
+        # Add progress bar for filtering step
+        self._process_with_progress(
+            nwb_assets,
+            check_asset_needs_processing,
+            "Filtering assets that need LINDI processing",
+            unit="asset",
+            postfix_func=lambda asset: {"asset": self._truncate_path(asset.path)},
+            leave=True
+        )
         
         if not assets_to_process:
             self.stdout.write("No assets need LINDI metadata processing")
@@ -1388,10 +1418,17 @@ class Command(BaseCommand):
 
     # Copy all the helper methods from load_sample_data.py
     def _load_contributor(self, data):
-        """Load a contributor from JSON data."""
+        """Load a contributor from JSON data with deduplication.
+        
+        Deduplication priority:
+        1. By identifier (if provided)
+        2. By email address (if provided)
+        3. By name (fallback)
+        """
         try:
             name = data.get('name', '')
             identifier = data.get('identifier', '').strip() if data.get('identifier') else ''
+            email = data.get('email', '').strip() if data.get('email') else ''
             
             # Try to find existing contributor by identifier first (if provided)
             contributor = None
@@ -1406,12 +1443,20 @@ class Command(BaseCommand):
                     if self.verbose:
                         self.stdout.write(f"Found existing contributor by identifier {identifier}: {contributor.name}")
             
-            # If no contributor found by identifier, try by name
+            # If no contributor found by identifier, try by email (if provided)
+            if not contributor and email:
+                existing_contributors = Contributor.objects.filter(email=email)
+                if existing_contributors.exists():
+                    contributor = existing_contributors.first()
+                    if self.verbose:
+                        self.stdout.write(f"Found existing contributor by email {email}: {contributor.name}")
+            
+            # If no contributor found by identifier or email, try by name
             if not contributor:
                 contributor, created = Contributor.objects.get_or_create(
                     name=name,
                     defaults={
-                        'email': data.get('email', ''),
+                        'email': email,
                         'identifier': identifier,
                         'schema_key': data.get('schemaKey', ''),
                         'award_number': data.get('awardNumber', ''),
@@ -1423,14 +1468,17 @@ class Command(BaseCommand):
             else:
                 # Update existing contributor with any missing information
                 updated = False
-                if not contributor.email and data.get('email'):
-                    contributor.email = data.get('email')
+                if not contributor.email and email:
+                    contributor.email = email
                     updated = True
                 if not contributor.url and data.get('url'):
                     contributor.url = data.get('url')
                     updated = True
                 if not contributor.award_number and data.get('awardNumber'):
                     contributor.award_number = data.get('awardNumber')
+                    updated = True
+                if not contributor.identifier and identifier:
+                    contributor.identifier = identifier
                     updated = True
                 
                 # Note: Role names are now stored in DandisetContributor relationships,

@@ -1,9 +1,6 @@
 from django.shortcuts import render, get_object_or_404
-from django.http import JsonResponse
 from ..models import Dandiset
 import requests
-import json
-from django.conf import settings
 from urllib.parse import urlencode
 from datetime import datetime
 

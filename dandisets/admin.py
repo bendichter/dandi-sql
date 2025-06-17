@@ -7,7 +7,6 @@ from django.core.management import call_command
 from django.utils.html import format_html
 from django.template.response import TemplateResponse
 import io
-import sys
 from .models import (
     Dandiset, Contributor, ContactPoint, Affiliation, SpeciesType,
     ApproachType, MeasurementTechniqueType, StandardsType, AssetsSummary,

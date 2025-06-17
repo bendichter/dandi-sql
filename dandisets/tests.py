@@ -11,15 +11,11 @@ Test Strategy:
 - Test error handling and edge cases
 """
 
-from django.test import TestCase, Client, TransactionTestCase
-from django.urls import reverse
-from django.db import connection
+from django.test import TestCase, Client
 from django.conf import settings
-import json
-import re
 import os
 
-from .models import Dandiset, Asset, Participant, SpeciesType, AssetDandiset
+from .models import Dandiset, Asset, AssetDandiset
 
 
 class PublishedDandisetTestCase(TestCase):

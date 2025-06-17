@@ -3,7 +3,6 @@ Production settings for dandi_sql project.
 """
 
 from .settings import *
-import os
 from decouple import config
 
 # Override development settings for production

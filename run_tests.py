@@ -21,7 +21,6 @@ import argparse
 import django
 from django.conf import settings
 from django.test.utils import get_runner
-from django.core.management import execute_from_command_line
 
 
 def setup_django():

@@ -7,7 +7,6 @@ and getting schema information.
 
 import json
 import logging
-from typing import Dict, Any
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -18,7 +17,6 @@ from django.forms.models import model_to_dict
 
 from ..query import QueryExecutor
 from ..query.schema import QuerySchema
-from ..query.exceptions import QueryValidationError, QueryExecutionError
 
 logger = logging.getLogger(__name__)
 

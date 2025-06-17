@@ -3,10 +3,8 @@ Platform deployment settings for Railway, Render, etc.
 """
 
 from .settings import *
-import os
 import dj_database_url
 from decouple import config
-import logging.config
 
 # Platform deployment settings
 DEBUG = config('DEBUG', default=False, cast=bool)
