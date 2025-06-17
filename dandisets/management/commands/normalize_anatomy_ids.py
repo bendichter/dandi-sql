@@ -1,3 +1,4 @@
+from typing import Optional
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from dandisets.models import Anatomy
@@ -14,7 +15,7 @@ class Command(BaseCommand):
             help='Show what would be done without making changes',
         )
 
-    def normalize_identifier(self, identifier):
+    def normalize_identifier(self, identifier: Optional[str]) -> Optional[str]:
         """Normalize UBERON identifiers to standard format"""
         if not identifier:
             return identifier

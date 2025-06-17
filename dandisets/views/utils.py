@@ -1,10 +1,11 @@
-from django.db.models import Count, Min, Max
+from typing import Dict, List, Tuple, Any, Optional
+from django.db.models import Count, Min, Max, QuerySet
 from ..models import SpeciesType, Anatomy, ApproachType, MeasurementTechniqueType, StandardsType
 import json
 import re
 
 
-def standardize_species_name(name):
+def standardize_species_name(name: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Standardize species names to reduce duplicates and return formatted display name"""
     if not name:
         return name, name
@@ -89,7 +90,7 @@ def standardize_species_name(name):
         return f"{title_name} - {title_name}", title_name
 
 
-def get_deduplicated_species():
+def get_deduplicated_species() -> List[Dict[str, Any]]:
     """Get deduplicated and standardized species list"""
     all_species = SpeciesType.objects.all().order_by('name')
     
@@ -134,7 +135,7 @@ def get_deduplicated_species():
     return deduplicated_species
 
 
-def get_filter_options():
+def get_filter_options() -> Dict[str, Any]:
     """Get all available filter options"""
     from ..models import AssetsSummary, SexType
     
@@ -152,7 +153,7 @@ def get_filter_options():
     }
 
 
-def get_unique_variables_measured():
+def get_unique_variables_measured() -> List[Tuple[str, str]]:
     """Extract unique variables measured from all assets summaries"""
     from ..models import AssetsSummary
     
@@ -193,7 +194,7 @@ def get_unique_variables_measured():
     return variables_list
 
 
-def get_dandiset_stats(queryset):
+def get_dandiset_stats(queryset: QuerySet) -> Dict[str, Any]:
     """Get statistics for the given queryset of dandisets"""
     stats = queryset.aggregate(
         total_count=Count('id'),

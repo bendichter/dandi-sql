@@ -1,4 +1,5 @@
-from django.http import JsonResponse
+from typing import Dict, Any
+from django.http import JsonResponse, HttpRequest
 from django.shortcuts import get_object_or_404
 from django.core.paginator import Paginator
 from django.db.models import Q
@@ -7,7 +8,7 @@ from ..models import Dandiset, Asset
 from .utils import get_filter_options, get_dandiset_stats
 
 
-def perform_dandiset_search(request_params):
+def perform_dandiset_search(request_params) -> Dict[str, Any]:
     """
     Core search logic that can be used by both web and API interfaces.
     
@@ -376,7 +377,7 @@ def perform_dandiset_search(request_params):
     }
 
 
-def api_filter_options(request):
+def api_filter_options(request: HttpRequest) -> JsonResponse:
     """JSON API endpoint for getting filter options"""
     options = get_filter_options()
     
@@ -406,7 +407,7 @@ def api_filter_options(request):
     return JsonResponse(data)
 
 
-def api_dandiset_assets(request, dandiset_id):
+def api_dandiset_assets(request: HttpRequest, dandiset_id: str) -> JsonResponse:
     """JSON API endpoint for getting paginated assets for a specific dandiset"""
     try:
         dandiset = get_object_or_404(Dandiset, id=dandiset_id)
@@ -546,7 +547,7 @@ def api_dandiset_assets(request, dandiset_id):
         }, status=500)
 
 
-def api_asset_search(request):
+def api_asset_search(request: HttpRequest) -> JsonResponse:
     """REST API endpoint for searching assets across all dandisets with pagination
     
     Supports asset-specific filtering and pagination.
