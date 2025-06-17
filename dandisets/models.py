@@ -672,6 +672,7 @@ class SyncTracker(models.Model):
         ('full', 'Full Sync'),
         ('dandisets', 'Dandisets Only'),
         ('assets', 'Assets Only'),
+        ('lindi', 'LINDI Metadata Only'),
     ]
     
     STATUS_CHOICES = [
@@ -688,6 +689,7 @@ class SyncTracker(models.Model):
     assets_synced = models.IntegerField(default=0, help_text="Number of assets synced")
     dandisets_updated = models.IntegerField(default=0, help_text="Number of dandisets updated")
     assets_updated = models.IntegerField(default=0, help_text="Number of assets updated")
+    lindi_metadata_processed = models.IntegerField(default=0, help_text="Number of LINDI metadata records processed")
     sync_duration_seconds = models.FloatField(default=0.0, help_text="Duration of sync in seconds")
     error_message = models.TextField(blank=True, null=True, help_text="Error message if sync failed")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -700,3 +702,34 @@ class SyncTracker(models.Model):
     
     def __str__(self):
         return f"{self.sync_type} sync ({self.status}) at {self.last_sync_timestamp}"
+
+
+class LindiMetadata(models.Model):
+    """Store LINDI metadata for NWB assets"""
+    asset = models.OneToOneField(Asset, on_delete=models.CASCADE, related_name='lindi_metadata')
+    structure_metadata = models.JSONField(help_text="Filtered LINDI structure (no base64 data or large arrays)")
+    lindi_url = models.URLField(help_text="URL to the original LINDI file")
+    processed_at = models.DateTimeField(auto_now_add=True)
+    processing_version = models.CharField(max_length=20, default="1.0")
+    sync_tracker = models.ForeignKey(SyncTracker, on_delete=models.SET_NULL, blank=True, null=True,
+                                   related_name='lindi_metadata_created', help_text="Sync operation that processed this LINDI metadata")
+    
+    class Meta:
+        verbose_name = "LINDI Metadata"
+        verbose_name_plural = "LINDI Metadata"
+        ordering = ['-processed_at']
+    
+    def __str__(self):
+        return f"LINDI metadata for {self.asset.path}"
+    
+    @property
+    def dandiset_id(self):
+        """Get the dandiset ID from the associated asset"""
+        if self.asset.dandisets.exists():
+            return self.asset.dandisets.first().base_id
+        return None
+    
+    @property
+    def asset_id(self):
+        """Get the asset ID"""
+        return self.asset.dandi_asset_id

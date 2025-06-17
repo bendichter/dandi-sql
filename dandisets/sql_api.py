@@ -41,6 +41,7 @@ class SQLSecurityValidator:
         'dandisets_anatomy',
         'dandisets_disorder',
         'dandisets_assetssummary',
+        'dandisets_lindimetadata',
     }
     
     # Forbidden SQL keywords that indicate write operations

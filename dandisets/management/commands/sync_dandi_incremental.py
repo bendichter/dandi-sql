@@ -1,13 +1,17 @@
 import json
 import re
 import time
+import requests
 from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Callable, Iterable, Union, Tuple
 from django.core.management.base import BaseCommand
 from django.utils.dateparse import parse_datetime
-from django.db import transaction
+from django.db import transaction, connections
 from django.db.models import Q
 from tqdm import tqdm
 from dandi.dandiapi import DandiAPIClient
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 from dandisets.models import (
     Dandiset, Contributor, SpeciesType, ApproachType, 
@@ -19,7 +23,7 @@ from dandisets.models import (
     AssetsSummaryMeasurementTechnique, Affiliation, ContributorAffiliation,
     Software, ActivityAssociation, Asset, Participant, AssetAccess,
     AssetApproach, AssetMeasurementTechnique, AssetWasAttributedTo,
-    AssetWasGeneratedBy, SexType, AssetDandiset, SyncTracker
+    AssetWasGeneratedBy, SexType, AssetDandiset, SyncTracker, LindiMetadata
 )
 
 
@@ -36,12 +40,20 @@ class Command(BaseCommand):
             'assets_checked': 0,
             'assets_updated': 0,
             'assets_skipped': 0,
+            'lindi_processed': 0,
+            'lindi_skipped': 0,
+            'lindi_errors': 0,
             'errors': 0,
         }
         self.dry_run = False
         self.verbose = False
+        self.session = requests.Session()
+        # Set a reasonable timeout and user agent for LINDI requests
+        self.session.headers.update({
+            'User-Agent': 'dandi-sql-unified-sync/1.0'
+        })
 
-    def normalize_uberon_identifier(self, identifier):
+    def normalize_uberon_identifier(self, identifier: Optional[str]) -> Optional[str]:
         """Normalize UBERON identifiers to standard format"""
         if not identifier:
             return identifier
@@ -57,6 +69,72 @@ class Command(BaseCommand):
             return f"CHEBI:{match.group(1)}"
             
         return identifier
+
+    def _normalize_dandiset_id(self, dandiset_id: Optional[str]) -> Optional[str]:
+        """Normalize dandiset ID to standard 6-digit format"""
+        if not dandiset_id:
+            return dandiset_id
+        
+        # Remove DANDI: prefix if present
+        if dandiset_id.startswith('DANDI:'):
+            dandiset_id = dandiset_id[6:]
+        
+        # Pad with zeros if needed (e.g., 3 -> 000003)
+        return dandiset_id.zfill(6)
+
+    def _process_with_progress(self, items, process_func, description, unit="item", postfix_func=None, leave=True):
+        """Generic function to process items with optional progress bar
+        
+        Args:
+            items: Iterable of items to process
+            process_func: Function to call for each item
+            description: Description for progress bar
+            unit: Unit name for progress bar
+            postfix_func: Optional function that takes an item and returns dict for postfix display
+            leave: Whether to leave progress bar after completion
+        """
+        if self.no_progress:
+            for item in items:
+                process_func(item)
+        else:
+            with tqdm(items, desc=description, unit=unit, leave=leave) as pbar:
+                for item in pbar:
+                    if postfix_func:
+                        pbar.set_postfix(**postfix_func(item))
+                    process_func(item)
+
+    def _truncate_path(self, path, max_length=30):
+        """Truncate a file path for display"""
+        if not path:
+            return 'unknown'
+        return path[:max_length] + '...' if len(path) > max_length else path
+
+    def _asset_has_lindi_metadata(self, asset):
+        """Check if an asset already has LINDI metadata"""
+        try:
+            LindiMetadata.objects.get(asset=asset)
+            return True
+        except LindiMetadata.DoesNotExist:
+            return False
+
+    def _should_process_lindi_for_asset(self, asset, force_refresh=False):
+        """Determine if an asset should have its LINDI metadata processed
+        
+        Args:
+            asset: The asset to check
+            force_refresh: If True, always process regardless of existing metadata
+            
+        Returns:
+            bool: True if asset should be processed, False otherwise
+        """
+        if force_refresh:
+            return True
+        
+        try:
+            LindiMetadata.objects.get(asset=asset)
+            return False  # Asset already has LINDI metadata
+        except LindiMetadata.DoesNotExist:
+            return True  # Asset needs LINDI metadata
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -105,11 +183,50 @@ class Command(BaseCommand):
             default=2000,
             help='Maximum number of assets to process per dandiset (default: 2000)',
         )
+        parser.add_argument(
+            '--skip-lindi',
+            action='store_true',
+            help='Skip LINDI metadata syncing for NWB assets',
+        )
+        parser.add_argument(
+            '--timeout',
+            type=int,
+            default=30,
+            help='HTTP timeout for LINDI requests in seconds (default: 30)',
+        )
+        parser.add_argument(
+            '--lindi-only',
+            action='store_true',
+            help='Only sync LINDI metadata for existing NWB assets (skip DANDI API sync)',
+        )
+        parser.add_argument(
+            '--force-lindi-refresh',
+            action='store_true',
+            help='Force refresh of LINDI metadata even if it already exists',
+        )
+        parser.add_argument(
+            '--dandiset-filter',
+            type=str,
+            help='Filter assets by dandiset ID for LINDI-only sync (e.g., 000003)',
+        )
+        parser.add_argument(
+            '--max-workers',
+            type=int,
+            default=4,
+            help='Maximum number of parallel workers for I/O operations (default: 4)',
+        )
+        parser.add_argument(
+            '--disable-parallel',
+            action='store_true',
+            help='Disable parallel processing (use single-threaded mode)',
+        )
 
     def handle(self, *args, **options):
         self.dry_run = options['dry_run']
         self.verbose = options['verbose']
         self.no_progress = options['no_progress']
+        self.options = options  # Store options for later use
+        self.timeout = options.get('timeout', 30)
         
         start_time = time.time()
         sync_tracker = None
@@ -143,8 +260,13 @@ class Command(BaseCommand):
                     sync_duration_seconds=0.0
                 )
             
-            # Perform unified sync - iterate through dandisets and handle both metadata and assets
-            self._sync_dandisets_and_assets(last_sync_time, options, sync_scope, sync_tracker)
+            # Check if this is a LINDI-only sync
+            if options.get('lindi_only'):
+                # Only sync LINDI metadata for existing NWB assets
+                self._sync_lindi_metadata_only(options, sync_tracker)
+            else:
+                # Perform unified sync - iterate through dandisets and handle both metadata and assets
+                self._sync_dandisets_and_assets(last_sync_time, options, sync_scope, sync_tracker)
             
             # Record sync completion
             end_time = time.time()
@@ -230,19 +352,18 @@ class Command(BaseCommand):
         # Filter dandisets that need updating
         dandisets_to_process = []
         
-        filter_desc = "Checking dandisets for updates"
-        if self.no_progress:
-            for api_dandiset in api_dandisets:
-                if self._dandiset_needs_update(api_dandiset, last_sync_time):
-                    dandisets_to_process.append(api_dandiset)
-                self.stats['dandisets_checked'] += 1
-        else:
-            with tqdm(api_dandisets, desc=filter_desc, unit="dandiset") as pbar:
-                for api_dandiset in pbar:
-                    pbar.set_postfix(current=api_dandiset.identifier)
-                    if self._dandiset_needs_update(api_dandiset, last_sync_time):
-                        dandisets_to_process.append(api_dandiset)
-                    self.stats['dandisets_checked'] += 1
+        def check_dandiset(api_dandiset):
+            if self._dandiset_needs_update(api_dandiset, last_sync_time):
+                dandisets_to_process.append(api_dandiset)
+            self.stats['dandisets_checked'] += 1
+        
+        self._process_with_progress(
+            api_dandisets,
+            check_dandiset,
+            "Checking dandisets for updates",
+            unit="dandiset",
+            postfix_func=lambda ds: {"current": ds.identifier}
+        )
         
         self.stdout.write(f"Found {len(dandisets_to_process)} dandisets to process")
         
@@ -251,15 +372,13 @@ class Command(BaseCommand):
             return
         
         # Process each dandiset (both metadata and assets)
-        process_desc = "Processing dandisets and assets"
-        if self.no_progress:
-            for api_dandiset in dandisets_to_process:
-                self._process_dandiset_and_assets(api_dandiset, last_sync_time, options, sync_scope, sync_tracker)
-        else:
-            with tqdm(dandisets_to_process, desc=process_desc, unit="dandiset") as pbar:
-                for api_dandiset in pbar:
-                    pbar.set_postfix(current=api_dandiset.identifier)
-                    self._process_dandiset_and_assets(api_dandiset, last_sync_time, options, sync_scope, sync_tracker)
+        self._process_with_progress(
+            dandisets_to_process,
+            lambda ds: self._process_dandiset_and_assets(ds, last_sync_time, options, sync_scope, sync_tracker),
+            "Processing dandisets and assets",
+            unit="dandiset",
+            postfix_func=lambda ds: {"current": ds.identifier}
+        )
 
     def _process_dandiset_and_assets(self, api_dandiset, last_sync_time, options, sync_scope, sync_tracker=None):
         """Process a single dandiset: update metadata and then process its assets"""
@@ -324,25 +443,22 @@ class Command(BaseCommand):
             
             # Process assets - filter and update in one pass
             assets_updated = 0
-            asset_desc = f"Processing assets for {api_dandiset.identifier}"
             
-            if self.no_progress:
-                for asset in api_assets:
-                    if self._asset_needs_update(asset, last_sync_time):
-                        self._update_asset(asset, local_dandiset, sync_tracker)
-                        assets_updated += 1
-                    self.stats['assets_checked'] += 1
-            else:
-                with tqdm(api_assets, desc=asset_desc, unit="asset", leave=False) as asset_pbar:
-                    for asset in asset_pbar:
-                        asset_path = getattr(asset, 'path', 'unknown')
-                        short_path = asset_path[:30] + '...' if len(asset_path) > 30 else asset_path
-                        asset_pbar.set_postfix(asset=short_path)
-                        
-                        if self._asset_needs_update(asset, last_sync_time):
-                            self._update_asset(asset, local_dandiset, sync_tracker)
-                            assets_updated += 1
-                        self.stats['assets_checked'] += 1
+            def process_asset(asset):
+                nonlocal assets_updated
+                if self._asset_needs_update(asset, last_sync_time):
+                    self._update_asset(asset, local_dandiset, sync_tracker)
+                    assets_updated += 1
+                self.stats['assets_checked'] += 1
+            
+            self._process_with_progress(
+                api_assets,
+                process_asset,
+                f"Processing assets for {api_dandiset.identifier}",
+                unit="asset",
+                postfix_func=lambda asset: {"asset": self._truncate_path(getattr(asset, 'path', 'unknown'))},
+                leave=False
+            )
             
             if self.verbose and assets_updated > 0:
                 self.stdout.write(f"Updated {assets_updated} assets for {api_dandiset.identifier}")
@@ -608,8 +724,7 @@ class Command(BaseCommand):
             else:
                 with tqdm(api_assets, desc=asset_filter_desc, unit="asset", leave=False) as asset_pbar:
                     for asset in asset_pbar:
-                        asset_path = getattr(asset, 'path', 'unknown')
-                        asset_pbar.set_postfix(asset=asset_path[:30] + '...' if len(asset_path) > 30 else asset_path)
+                        asset_pbar.set_postfix(asset=self._truncate_path(getattr(asset, 'path', 'unknown')))
                         if self._asset_needs_update(asset, last_sync_time):
                             assets_to_update.append(asset)
                         self.stats['assets_checked'] += 1
@@ -625,8 +740,7 @@ class Command(BaseCommand):
             else:
                 with tqdm(assets_to_update, desc=asset_update_desc, unit="asset", leave=False) as update_pbar:
                     for asset in update_pbar:
-                        asset_path = getattr(asset, 'path', 'unknown')
-                        update_pbar.set_postfix(asset=asset_path[:30] + '...' if len(asset_path) > 30 else asset_path)
+                        update_pbar.set_postfix(asset=self._truncate_path(getattr(asset, 'path', 'unknown')))
                         self._update_asset(asset, dandiset)
                         
         except Exception as e:
@@ -708,14 +822,270 @@ class Command(BaseCommand):
             
             with transaction.atomic():
                 metadata = api_asset.get_raw_metadata()
-                self._load_asset(metadata, dandiset, sync_tracker)
+                asset = self._load_asset(metadata, dandiset, sync_tracker)
                 self.stats['assets_updated'] += 1
+                
+                # After updating the asset, try to sync LINDI metadata if it's an NWB file
+                if not self.options.get('skip_lindi', False) and asset and asset.encoding_format == 'application/x-nwb':
+                    self._process_lindi_for_asset(asset, sync_tracker)
                 
         except Exception as e:
             self.stats['errors'] += 1
             if self.verbose:
                 asset_path = getattr(api_asset, 'path', 'unknown')
                 self.stdout.write(f"Error updating asset {asset_path}: {e}")
+
+    def _sync_lindi_metadata_only(self, options, sync_tracker=None):
+        """Sync LINDI metadata only for existing NWB assets without touching DANDI API data"""
+        self.stdout.write("Starting LINDI-only metadata sync...")
+        
+        # Build query for NWB assets
+        query = Q(encoding_format='application/x-nwb')
+        
+        # Filter by dandiset if specified
+        if options.get('dandiset_filter'):
+            dandiset_filter = self._normalize_dandiset_id(options['dandiset_filter'])
+            query &= Q(dandisets__base_id__endswith=dandiset_filter)
+            
+            if self.verbose:
+                self.stdout.write(f"Filtering assets for dandiset: {dandiset_filter}")
+        
+        # Get NWB assets
+        nwb_assets = Asset.objects.filter(query).distinct()
+        
+        if not nwb_assets.exists():
+            self.stdout.write("No NWB assets found matching criteria")
+            return
+        
+        total_assets = nwb_assets.count()
+        self.stdout.write(f"Found {total_assets} NWB assets to process")
+        
+        # Filter assets that need LINDI processing
+        assets_to_process = []
+        
+        for asset in nwb_assets:
+            needs_processing = False
+            
+            # Check if force refresh is enabled
+            if options.get('force_lindi_refresh'):
+                needs_processing = True
+            else:
+                # Check if asset already has LINDI metadata
+                try:
+                    LindiMetadata.objects.get(asset=asset)
+                    # Asset already has LINDI metadata
+                    needs_processing = False
+                except LindiMetadata.DoesNotExist:
+                    needs_processing = True
+            
+            if needs_processing:
+                assets_to_process.append(asset)
+            else:
+                self.stats['lindi_skipped'] += 1
+        
+        if not assets_to_process:
+            self.stdout.write("No assets need LINDI metadata processing")
+            return
+        
+        self.stdout.write(f"Processing LINDI metadata for {len(assets_to_process)} assets")
+        
+        # Process assets - use parallel processing if not disabled
+        process_desc = "Processing LINDI metadata for assets"
+        
+        if options.get('disable_parallel') or options.get('max_workers', 4) <= 1:
+            # Single-threaded processing
+            if self.no_progress:
+                for asset in assets_to_process:
+                    self._process_lindi_for_existing_asset(asset, sync_tracker)
+                    self.stats['assets_checked'] += 1
+            else:
+                with tqdm(assets_to_process, desc=process_desc, unit="asset") as pbar:
+                    for asset in pbar:
+                        pbar.set_postfix(asset=self._truncate_path(asset.path))
+                        self._process_lindi_for_existing_asset(asset, sync_tracker)
+                        self.stats['assets_checked'] += 1
+        else:
+            # Parallel processing
+            self._process_lindi_parallel(assets_to_process, sync_tracker, options)
+
+    def _process_lindi_parallel(self, assets_to_process, sync_tracker, options):
+        """Process LINDI metadata for multiple assets in parallel"""
+        max_workers = options.get('max_workers', 4)
+        self.stdout.write(f"Using parallel processing with {max_workers} workers")
+        
+        # Thread-safe statistics tracking
+        stats_lock = threading.Lock()
+        
+        def process_single_asset(asset):
+            """Process a single asset - used by worker threads"""
+            try:
+                # Use helper method to determine if asset should be processed
+                should_process = self._should_process_lindi_for_asset(
+                    asset, 
+                    force_refresh=options.get('force_lindi_refresh', False)
+                )
+                
+                if not should_process:
+                    with stats_lock:
+                        self.stats['lindi_skipped'] += 1
+                        self.stats['assets_checked'] += 1
+                    return f"Skipped {asset.dandi_asset_id} (already has metadata)"
+
+                # Construct LINDI URL
+                lindi_url = self._construct_lindi_url(asset)
+                if not lindi_url:
+                    with stats_lock:
+                        self.stats['lindi_skipped'] += 1
+                        self.stats['assets_checked'] += 1
+                    return f"Skipped {asset.dandi_asset_id} (no URL)"
+
+                # Download LINDI file (each worker has its own session)
+                worker_session = requests.Session()
+                worker_session.headers.update(self.session.headers)
+                
+                try:
+                    response = worker_session.get(lindi_url, timeout=self.timeout)
+                    response.raise_for_status()
+                    lindi_data = response.json()
+                except Exception as e:
+                    with stats_lock:
+                        self.stats['lindi_errors'] += 1
+                        self.stats['assets_checked'] += 1
+                    return f"Error downloading {asset.dandi_asset_id}: {e}"
+                finally:
+                    worker_session.close()
+
+                # Filter LINDI data
+                filtered_data = self._filter_lindi_data(lindi_data)
+
+                # Save to database (ensure each worker has its own connection)
+                if not self.dry_run:
+                    try:
+                        # Close any existing connection to ensure clean state
+                        connections.close_all()
+                        
+                        with transaction.atomic():
+                            lindi_metadata, created = LindiMetadata.objects.update_or_create(
+                                asset=asset,
+                                defaults={
+                                    'structure_metadata': filtered_data,
+                                    'lindi_url': lindi_url,
+                                    'processing_version': '1.0',
+                                    'sync_tracker': sync_tracker,
+                                }
+                            )
+                        
+                        with stats_lock:
+                            self.stats['lindi_processed'] += 1
+                            self.stats['assets_checked'] += 1
+                        
+                        action = "Created" if created else "Updated"
+                        return f"{action} LINDI metadata for {asset.dandi_asset_id}"
+                        
+                    except Exception as e:
+                        with stats_lock:
+                            self.stats['lindi_errors'] += 1
+                            self.stats['assets_checked'] += 1
+                        return f"Error saving {asset.dandi_asset_id}: {e}"
+                else:
+                    with stats_lock:
+                        self.stats['lindi_processed'] += 1
+                        self.stats['assets_checked'] += 1
+                    return f"Would process LINDI metadata for {asset.dandi_asset_id}"
+                    
+            except Exception as e:
+                with stats_lock:
+                    self.stats['lindi_errors'] += 1
+                    self.stats['assets_checked'] += 1
+                return f"Unexpected error processing {asset.dandi_asset_id}: {e}"
+
+        # Process assets in parallel
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            if self.no_progress:
+                # Submit all jobs and wait for completion
+                futures = {executor.submit(process_single_asset, asset): asset for asset in assets_to_process}
+                
+                for future in as_completed(futures):
+                    asset = futures[future]
+                    try:
+                        result = future.result()
+                        if self.verbose:
+                            self.stdout.write(result)
+                    except Exception as exc:
+                        if self.verbose:
+                            self.stdout.write(f'Asset {asset.dandi_asset_id} generated an exception: {exc}')
+            else:
+                # Use progress bar
+                futures = {executor.submit(process_single_asset, asset): asset for asset in assets_to_process}
+                
+                with tqdm(total=len(assets_to_process), desc="Processing LINDI metadata (parallel)", unit="asset") as pbar:
+                    for future in as_completed(futures):
+                        asset = futures[future]
+                        try:
+                            result = future.result()
+                            pbar.set_postfix(asset=self._truncate_path(asset.path))
+                            if self.verbose:
+                                self.stdout.write(result)
+                        except Exception as exc:
+                            if self.verbose:
+                                self.stdout.write(f'Asset {asset.dandi_asset_id} generated an exception: {exc}')
+                        finally:
+                            pbar.update(1)
+
+        # Ensure all database connections are closed after parallel processing
+        connections.close_all()
+
+    def _process_lindi_for_existing_asset(self, asset, sync_tracker=None):
+        """Process LINDI metadata for an existing asset (used in LINDI-only sync)"""
+        try:
+            # Use helper method to determine if asset should be processed
+            should_process = self._should_process_lindi_for_asset(
+                asset, 
+                force_refresh=self.options.get('force_lindi_refresh', False)
+            )
+            
+            if should_process and self.options.get('force_lindi_refresh') and self.verbose:
+                self.stdout.write(f"Force refreshing LINDI metadata for: {asset.path}")
+            
+            if not should_process:
+                if self.verbose:
+                    self.stdout.write(f"Asset {asset.dandi_asset_id} already has LINDI metadata, skipping")
+                self.stats['lindi_skipped'] += 1
+                return
+
+            # Construct LINDI URL
+            lindi_url = self._construct_lindi_url(asset)
+            if not lindi_url:
+                if self.verbose:
+                    self.stdout.write(f"Could not construct LINDI URL for asset {asset.dandi_asset_id}")
+                self.stats['lindi_skipped'] += 1
+                return
+
+            # Download and process LINDI file
+            lindi_data = self._download_lindi_file(lindi_url)
+            if not lindi_data:
+                self.stats['lindi_errors'] += 1
+                return
+
+            # Filter LINDI data
+            filtered_data = self._filter_lindi_data(lindi_data)
+
+            # Save to database (don't skip in dry run for LINDI-only sync)
+            if self.dry_run:
+                if self.verbose:
+                    self.stdout.write(f"Would process LINDI metadata for: {asset.path}")
+                self.stats['lindi_processed'] += 1
+            else:
+                self._save_lindi_metadata(asset, lindi_url, lindi_data, filtered_data, sync_tracker)
+                self.stats['lindi_processed'] += 1
+
+                if self.verbose:
+                    self.stdout.write(f"Processed LINDI metadata for: {asset.path}")
+
+        except Exception as e:
+            self.stats['lindi_errors'] += 1
+            if self.verbose:
+                self.stdout.write(f"Error processing LINDI for asset {asset.dandi_asset_id}: {e}")
 
     def _record_sync_completion(self, sync_tracker, duration):
         """Record sync completion in database"""
@@ -743,19 +1113,26 @@ class Command(BaseCommand):
     def _print_summary(self, duration):
         """Print sync summary"""
         self.stdout.write("\n" + "="*50)
-        self.stdout.write("SYNC SUMMARY")
+        self.stdout.write("UNIFIED SYNC SUMMARY")
         self.stdout.write("="*50)
         self.stdout.write(f"Duration: {duration:.2f} seconds")
         self.stdout.write(f"Dandisets checked: {self.stats['dandisets_checked']}")
         self.stdout.write(f"Dandisets updated: {self.stats['dandisets_updated']}")
         self.stdout.write(f"Assets checked: {self.stats['assets_checked']}")
         self.stdout.write(f"Assets updated: {self.stats['assets_updated']}")
-        self.stdout.write(f"Errors: {self.stats['errors']}")
+        
+        # Show LINDI statistics only if LINDI processing was enabled
+        if not self.options.get('skip_lindi', False):
+            self.stdout.write(f"LINDI metadata processed: {self.stats['lindi_processed']}")
+            self.stdout.write(f"LINDI metadata skipped: {self.stats['lindi_skipped']}")
+            self.stdout.write(f"LINDI errors: {self.stats['lindi_errors']}")
+        
+        self.stdout.write(f"Total errors: {self.stats['errors']}")
         
         if self.dry_run:
             self.stdout.write(self.style.WARNING("DRY RUN - No changes were made"))
         else:
-            self.stdout.write(self.style.SUCCESS("Sync completed successfully"))
+            self.stdout.write(self.style.SUCCESS("Unified sync completed successfully"))
 
     # Include all the helper methods from load_sample_data.py for loading data
     def _load_dandiset(self, data, sync_tracker=None):
@@ -1339,3 +1716,219 @@ class Command(BaseCommand):
             if self.verbose:
                 self.stdout.write(f"Error loading participant: {e}")
             return None
+
+    def _process_lindi_for_asset(self, asset, sync_tracker=None):
+        """Process LINDI metadata for a single NWB asset"""
+        try:
+            # Check if asset already has LINDI metadata (unless force refresh)
+            if hasattr(asset, 'lindi_metadata') and asset.lindi_metadata:
+                if self.verbose:
+                    self.stdout.write(f"Asset {asset.dandi_asset_id} already has LINDI metadata, skipping")
+                self.stats['lindi_skipped'] += 1
+                return
+
+            # Construct LINDI URL
+            lindi_url = self._construct_lindi_url(asset)
+            if not lindi_url:
+                if self.verbose:
+                    self.stdout.write(f"Could not construct LINDI URL for asset {asset.dandi_asset_id}")
+                self.stats['lindi_skipped'] += 1
+                return
+
+            # Download and process LINDI file
+            lindi_data = self._download_lindi_file(lindi_url)
+            if not lindi_data:
+                self.stats['lindi_errors'] += 1
+                return
+
+            # Filter LINDI data
+            filtered_data = self._filter_lindi_data(lindi_data)
+
+            # Save to database
+            self._save_lindi_metadata(asset, lindi_url, lindi_data, filtered_data, sync_tracker)
+            self.stats['lindi_processed'] += 1
+
+            if self.verbose:
+                self.stdout.write(f"Processed LINDI metadata for: {asset.path}")
+
+        except Exception as e:
+            self.stats['lindi_errors'] += 1
+            if self.verbose:
+                self.stdout.write(f"Error processing LINDI for asset {asset.dandi_asset_id}: {e}")
+
+    def _construct_lindi_url(self, asset):
+        """Construct the LINDI URL for an asset"""
+        try:
+            # Get dandiset ID from asset relationships
+            if not asset.dandisets.exists():
+                return None
+
+            dandiset = asset.dandisets.first()
+            dandiset_id = dandiset.base_id.replace('DANDI:', '').zfill(6)
+
+            # Pattern: https://lindi.neurosift.org/dandi/dandisets/{dandiset_id}/assets/{asset_id}/nwb.lindi.json
+            lindi_url = f"https://lindi.neurosift.org/dandi/dandisets/{dandiset_id}/assets/{asset.dandi_asset_id}/nwb.lindi.json"
+
+            return lindi_url
+
+        except Exception as e:
+            if self.verbose:
+                self.stdout.write(f"Error constructing LINDI URL for {asset.dandi_asset_id}: {e}")
+            return None
+
+    def _download_lindi_file(self, lindi_url):
+        """Download LINDI file from URL"""
+        try:
+            if self.verbose:
+                self.stdout.write(f"Downloading LINDI file: {lindi_url}")
+
+            response = self.session.get(lindi_url, timeout=self.timeout)
+            response.raise_for_status()
+
+            return response.json()
+
+        except requests.exceptions.Timeout:
+            if self.verbose:
+                self.stdout.write(f"Timeout downloading LINDI file: {lindi_url}")
+            return None
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                if self.verbose:
+                    self.stdout.write(f"LINDI file not found: {lindi_url}")
+            else:
+                if self.verbose:
+                    self.stdout.write(f"HTTP error downloading LINDI file {lindi_url}: {e}")
+            return None
+        except requests.exceptions.RequestException as e:
+            if self.verbose:
+                self.stdout.write(f"Request error downloading LINDI file {lindi_url}: {e}")
+            return None
+        except json.JSONDecodeError as e:
+            if self.verbose:
+                self.stdout.write(f"JSON decode error for LINDI file {lindi_url}: {e}")
+            return None
+
+    def _filter_lindi_data(self, lindi_data):
+        """Filter LINDI data to remove base64-encoded values and large data arrays"""
+        try:
+            # Extract generation metadata and clean it
+            generation_metadata = self._clean_json_data(lindi_data.get('generationMetadata', {}))
+
+            # Filter refs data using the provided logic
+            refs_data = lindi_data.get('refs', {})
+            filtered_refs = {}
+
+            for key, val in refs_data.items():
+                # Skip base64-encoded values
+                if isinstance(val, str) and val.startswith("base64:"):
+                    continue
+
+                # Skip array data that looks like [chunks, dtype, shape] format
+                if isinstance(val, list) and len(val) == 3:
+                    continue
+
+                # Skip strings with problematic Unicode escape sequences
+                if isinstance(val, str) and self._has_problematic_unicode(val):
+                    continue
+
+                # Clean the value and keep it
+                cleaned_val = self._clean_json_data(val)
+                filtered_refs[key] = cleaned_val
+
+            if self.verbose:
+                original_count = len(refs_data)
+                filtered_count = len(filtered_refs)
+                removed_count = original_count - filtered_count
+                self.stdout.write(f"Filtered LINDI refs: kept {filtered_count}, removed {removed_count} entries")
+
+            return {
+                'generationMetadata': generation_metadata,
+                'refs': filtered_refs
+            }
+
+        except Exception as e:
+            if self.verbose:
+                self.stdout.write(f"Error filtering LINDI data: {e}")
+            return lindi_data  # Return original data if filtering fails
+
+    def _has_problematic_unicode(self, text):
+        """Check if text contains problematic Unicode escape sequences"""
+        if not isinstance(text, str):
+            return False
+
+        # Check for null bytes and other control characters
+        problematic_sequences = [
+            '\\u0000', '\\u0001', '\\u0002', '\\u0003', '\\u0004', '\\u0005',
+            '\\u0006', '\\u0007', '\\u0008', '\\u000b', '\\u000c', '\\u000e',
+            '\\u000f', '\\u0010', '\\u0011', '\\u0012', '\\u0013', '\\u0014',
+            '\\u0015', '\\u0016', '\\u0017', '\\u0018', '\\u0019', '\\u001a',
+            '\\u001b', '\\u001c', '\\u001d', '\\u001e', '\\u001f'
+        ]
+
+        return any(seq in text for seq in problematic_sequences)
+
+    def _clean_json_data(self, data):
+        """Recursively clean JSON data to remove problematic characters"""
+        if isinstance(data, dict):
+            cleaned = {}
+            for k, v in data.items():
+                # Clean the key
+                clean_key = self._clean_string(k) if isinstance(k, str) else k
+                # Clean the value recursively
+                clean_value = self._clean_json_data(v)
+                cleaned[clean_key] = clean_value
+            return cleaned
+        elif isinstance(data, list):
+            return [self._clean_json_data(item) for item in data]
+        elif isinstance(data, str):
+            return self._clean_string(data)
+        else:
+            return data
+
+    def _clean_string(self, text):
+        """Clean a string by removing or replacing problematic Unicode sequences"""
+        if not isinstance(text, str):
+            return text
+
+        # Replace null bytes and other control characters with empty string
+        import re
+        # Remove control characters (except normal whitespace: \t, \n, \r)
+        cleaned = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+
+        # Also handle Unicode escape sequences in the string itself
+        problematic_patterns = [
+            r'\\u000[0-9a-fA-F]',  # \u0000 to \u000F
+            r'\\u001[0-9a-fA-F]',  # \u0010 to \u001F
+        ]
+
+        for pattern in problematic_patterns:
+            cleaned = re.sub(pattern, '', cleaned)
+
+        return cleaned
+
+    def _save_lindi_metadata(self, asset, lindi_url, original_data, filtered_data, sync_tracker=None):
+        """Save LINDI metadata to database"""
+        try:
+            with transaction.atomic():
+                # Create or update LindiMetadata record - store complete filtered data structure
+                lindi_metadata, created = LindiMetadata.objects.update_or_create(
+                    asset=asset,
+                    defaults={
+                        'structure_metadata': filtered_data,  # Complete filtered structure including generationMetadata
+                        'lindi_url': lindi_url,
+                        'processing_version': '1.0',
+                        'sync_tracker': sync_tracker,
+                    }
+                )
+
+                if created:
+                    if self.verbose:
+                        self.stdout.write(f"Created new LINDI metadata record for {asset.dandi_asset_id}")
+                else:
+                    if self.verbose:
+                        self.stdout.write(f"Updated existing LINDI metadata record for {asset.dandi_asset_id}")
+
+        except Exception as e:
+            if self.verbose:
+                self.stdout.write(f"Error saving LINDI metadata for {asset.dandi_asset_id}: {e}")
+            raise
