@@ -73,6 +73,12 @@ def search_dandisets(request):
         query_params['include_assets'] = 'true'
         query_params['assets_per_dandiset'] = 5  # Show 5 assets per dandiset
     
+    # Always include assets count information to get accurate filtered counts for accordion headers
+    # but don't include the actual asset data unless requested
+    if not show_assets:
+        query_params['include_assets'] = 'true'
+        query_params['assets_per_dandiset'] = 0  # Don't include asset data, just counts
+    
     try:
         # Make internal API call to search endpoint
         api_url = f"{request.build_absolute_uri('/').rstrip('/')}/api/search/"

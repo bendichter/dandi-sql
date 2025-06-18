@@ -477,11 +477,16 @@
                                             <strong>View Assets</strong>
                                             {% if item.total_assets %}
                                             <small class="text-muted ms-2" id="assetCount{{ dandiset.id }}">
-                                                {% if has_any_filters %}
-                                                    ({{ item.filtered_assets }} of {{ item.total_assets }} files match filters)
-                                                {% else %}
-                                                    ({{ item.total_assets }} total files)
-                                                {% endif %}
+                                                <span class="asset-count-display" 
+                                                      data-total="{{ item.total_assets }}" 
+                                                      data-filtered="{{ item.filtered_assets }}"
+                                                      data-has-filters="{{ has_asset_filters|yesno:'true,false' }}">
+                                                    {% if has_asset_filters %}
+                                                        ({{ item.filtered_assets }} of {{ item.total_assets }} files match filters)
+                                                    {% else %}
+                                                        ({{ item.total_assets }} total files)
+                                                    {% endif %}
+                                                </span>
                                             </small>
                                             {% endif %}
                                         </button>
@@ -691,14 +696,15 @@ function updateAccordionButtonText(dandisetId, filteredCount, totalCount) {
     if (!button) return;
     
     // Find the text element within the button
-    const textContainer = button.querySelector('small.text-muted');
+    const textContainer = button.querySelector('.asset-count-display');
     if (!textContainer) return;
     
-    // Check if any filters are applied by examining the current URL
-    const hasAnyFilters = window.location.search.length > 0;
+    // Check if filters are applied - use a more reliable method than URL parsing
+    // by checking if the filtered count is different from total count
+    const hasFilters = filteredCount !== totalCount;
     
     // Update text based on whether there are filters applied
-    if (!hasAnyFilters) {
+    if (!hasFilters) {
         textContainer.textContent = `(${totalCount} total files)`;
     } else {
         textContainer.textContent = `(${filteredCount} of ${totalCount} files match filters)`;
