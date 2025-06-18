@@ -362,8 +362,33 @@ def perform_dandiset_search(request_params) -> Dict[str, Any]:
         if other_asset_query != Q():
             dandisets = dandisets.filter(assets__in=Asset.objects.filter(other_asset_query)).distinct()
     
-    # Order by name
-    dandisets = dandisets.order_by('name')
+    # Apply ordering
+    order_by = request_params.get('order_by', '-date_published')
+    
+    # Define valid ordering fields and their corresponding model fields
+    order_field_mapping = {
+        'name': 'name',
+        '-name': '-name',
+        'date_published': 'date_published',
+        '-date_published': '-date_published',
+        'created': 'date_created',
+        '-created': '-date_created',
+        'assets_summary__number_of_bytes': 'assets_summary__number_of_bytes',
+        '-assets_summary__number_of_bytes': '-assets_summary__number_of_bytes',
+        'assets_summary__number_of_subjects': 'assets_summary__number_of_subjects',
+        '-assets_summary__number_of_subjects': '-assets_summary__number_of_subjects',
+        'assets_summary__number_of_files': 'assets_summary__number_of_files',
+        '-assets_summary__number_of_files': '-assets_summary__number_of_files',
+    }
+    
+    # Apply ordering if valid
+    if order_by in order_field_mapping:
+        dandisets = dandisets.order_by(order_field_mapping[order_by])
+        filters['order_by'] = order_by
+    else:
+        # Default ordering
+        dandisets = dandisets.order_by('-date_published')
+        filters['order_by'] = '-date_published'
     
     # Get statistics for the current filtered results
     stats = get_dandiset_stats(dandisets)

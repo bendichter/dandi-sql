@@ -12,28 +12,50 @@
         <!-- Search Form -->
         <div class="filter-section">
             <form method="get" id="searchForm">
-                <div class="row">
+                <!-- Search & Sort Row -->
+                <div class="row mb-2">
                     <!-- Text Search -->
-                    <div class="col-md-12 mb-3">
-                        <label for="search" class="form-label">
+                    <div class="col-md-8 mb-2">
+                        <label for="search" class="form-label form-label-sm">
                             <i class="fas fa-font"></i> Text Search
                         </label>
                         <input type="text" 
-                               class="form-control" 
+                               class="form-control form-control-sm" 
                                id="search" 
                                name="search" 
                                value="{{ current_filters.search|default:'' }}"
-                               placeholder="Search in name, description, or keywords...">
+                               placeholder="Search name, description, keywords...">
+                    </div>
+                    
+                    <!-- Sort Order -->
+                    <div class="col-md-4 mb-2">
+                        <label for="order_by" class="form-label form-label-sm">
+                            <i class="fas fa-sort"></i> Sort By
+                        </label>
+                        <select class="form-select form-select-sm" id="order_by" name="order_by">
+                            <option value="name" {% if current_filters.order_by == 'name' %}selected{% endif %}>Name (A-Z)</option>
+                            <option value="-name" {% if current_filters.order_by == '-name' %}selected{% endif %}>Name (Z-A)</option>
+                            <option value="-date_published" {% if current_filters.order_by == '-date_published' or not current_filters.order_by %}selected{% endif %}>Newest Published</option>
+                            <option value="date_published" {% if current_filters.order_by == 'date_published' %}selected{% endif %}>Oldest Published</option>
+                            <option value="-created" {% if current_filters.order_by == '-created' %}selected{% endif %}>Newest Created</option>
+                            <option value="created" {% if current_filters.order_by == 'created' %}selected{% endif %}>Oldest Created</option>
+                            <option value="-assets_summary__number_of_bytes" {% if current_filters.order_by == '-assets_summary__number_of_bytes' %}selected{% endif %}>Largest Size</option>
+                            <option value="assets_summary__number_of_bytes" {% if current_filters.order_by == 'assets_summary__number_of_bytes' %}selected{% endif %}>Smallest Size</option>
+                            <option value="-assets_summary__number_of_subjects" {% if current_filters.order_by == '-assets_summary__number_of_subjects' %}selected{% endif %}>Most Subjects</option>
+                            <option value="assets_summary__number_of_subjects" {% if current_filters.order_by == 'assets_summary__number_of_subjects' %}selected{% endif %}>Least Subjects</option>
+                            <option value="-assets_summary__number_of_files" {% if current_filters.order_by == '-assets_summary__number_of_files' %}selected{% endif %}>Most Files</option>
+                            <option value="assets_summary__number_of_files" {% if current_filters.order_by == 'assets_summary__number_of_files' %}selected{% endif %}>Least Files</option>
+                        </select>
                     </div>
                 </div>
                 
-                <div class="row">
-                    <!-- Species Filter -->
-                    <div class="col-md-6 mb-3">
-                        <label for="species" class="form-label">
+                <!-- Biological Filters -->
+                <div class="row mb-2">
+                    <div class="col-md-3 mb-2">
+                        <label for="species" class="form-label form-label-sm">
                             <i class="fas fa-paw"></i> Species
                         </label>
-                        <select class="form-select" id="species" name="species" multiple size="4">
+                        <select class="form-select form-select-sm" id="species" name="species" multiple size="3">
                             {% for species in filter_options.species %}
                                 <option value="{{ species.id }}" 
                                         {% if species.id|stringformat:"s" in current_filters.species or species.name in current_filters.species %}selected{% endif %}>
@@ -41,15 +63,13 @@
                                 </option>
                             {% endfor %}
                         </select>
-                        <small class="form-text text-muted">Hold Ctrl/Cmd to select multiple</small>
                     </div>
                     
-                    <!-- Anatomy Filter -->
-                    <div class="col-md-6 mb-3">
-                        <label for="anatomy" class="form-label">
+                    <div class="col-md-3 mb-2">
+                        <label for="anatomy" class="form-label form-label-sm">
                             <i class="fas fa-brain"></i> Anatomy
                         </label>
-                        <select class="form-select" id="anatomy" name="anatomy" multiple size="4">
+                        <select class="form-select form-select-sm" id="anatomy" name="anatomy" multiple size="3">
                             {% for anatomy in filter_options.anatomy %}
                                 <option value="{{ anatomy.id }}" 
                                         {% if anatomy.id|stringformat:"s" in current_filters.anatomy or anatomy.name in current_filters.anatomy %}selected{% endif %}>
@@ -57,17 +77,13 @@
                                 </option>
                             {% endfor %}
                         </select>
-                        <small class="form-text text-muted">Hold Ctrl/Cmd to select multiple</small>
                     </div>
-                </div>
-                
-                <div class="row">
-                    <!-- Approach Filter -->
-                    <div class="col-md-6 mb-3">
-                        <label for="approach" class="form-label">
+                    
+                    <div class="col-md-3 mb-2">
+                        <label for="approach" class="form-label form-label-sm">
                             <i class="fas fa-microscope"></i> Approach
                         </label>
-                        <select class="form-select" id="approach" name="approach" multiple size="4">
+                        <select class="form-select form-select-sm" id="approach" name="approach" multiple size="3">
                             {% for approach in filter_options.approaches %}
                                 <option value="{{ approach.id }}" 
                                         {% if approach.id|stringformat:"s" in current_filters.approach or approach.name in current_filters.approach %}selected{% endif %}>
@@ -75,15 +91,13 @@
                                 </option>
                             {% endfor %}
                         </select>
-                        <small class="form-text text-muted">Hold Ctrl/Cmd to select multiple</small>
                     </div>
                     
-                    <!-- Measurement Technique Filter -->
-                    <div class="col-md-6 mb-3">
-                        <label for="measurement_technique" class="form-label">
-                            <i class="fas fa-tools"></i> Measurement Technique
+                    <div class="col-md-3 mb-2">
+                        <label for="measurement_technique" class="form-label form-label-sm">
+                            <i class="fas fa-tools"></i> Measurement
                         </label>
-                        <select class="form-select" id="measurement_technique" name="measurement_technique" multiple size="4">
+                        <select class="form-select form-select-sm" id="measurement_technique" name="measurement_technique" multiple size="3">
                             {% for technique in filter_options.measurement_techniques %}
                                 <option value="{{ technique.id }}" 
                                         {% if technique.id|stringformat:"s" in current_filters.measurement_technique or technique.name in current_filters.measurement_technique %}selected{% endif %}>
@@ -91,21 +105,19 @@
                                 </option>
                             {% endfor %}
                         </select>
-                        <small class="form-text text-muted">Hold Ctrl/Cmd to select multiple</small>
                     </div>
                 </div>
                 
-                
-                <div class="row">
-                    <!-- File Format Filter -->
-                    <div class="col-md-6 mb-3">
-                        <label for="file_format" class="form-label">
+                <!-- Technical & Data Filters -->
+                <div class="row mb-2">
+                    <div class="col-md-4 mb-2">
+                        <label for="file_format" class="form-label form-label-sm">
                             <i class="fas fa-file-code"></i> File Format
                         </label>
-                        <select class="form-select" id="file_format" name="file_format" multiple size="4">
+                        <select class="form-select form-select-sm" id="file_format" name="file_format" multiple size="3">
                             <option value="application/x-nwb" 
                                     {% if 'application/x-nwb' in current_filters.file_format %}selected{% endif %}>
-                                NWB (Neurodata Without Borders)
+                                NWB
                             </option>
                             <option value="application/x-hdf5" 
                                     {% if 'application/x-hdf5' in current_filters.file_format %}selected{% endif %}>
@@ -124,15 +136,13 @@
                                 JSON
                             </option>
                         </select>
-                        <small class="form-text text-muted">Hold Ctrl/Cmd to select multiple</small>
                     </div>
                     
-                    <!-- Data Standards Filter -->
-                    <div class="col-md-6 mb-3">
-                        <label for="data_standards" class="form-label">
+                    <div class="col-md-4 mb-2">
+                        <label for="data_standards" class="form-label form-label-sm">
                             <i class="fas fa-certificate"></i> Data Standards
                         </label>
-                        <select class="form-select" id="data_standards" name="data_standards" multiple size="4">
+                        <select class="form-select form-select-sm" id="data_standards" name="data_standards" multiple size="3">
                             {% for standard in filter_options.data_standards %}
                                 <option value="{{ standard.id }}" 
                                         {% if standard.id|stringformat:"s" in current_filters.data_standards or standard.name in current_filters.data_standards %}selected{% endif %}>
@@ -140,17 +150,13 @@
                                 </option>
                             {% endfor %}
                         </select>
-                        <small class="form-text text-muted">Hold Ctrl/Cmd to select multiple</small>
                     </div>
-                </div>
-                
-                <div class="row">
-                    <!-- Variables Measured Filter -->
-                    <div class="col-md-6 mb-3">
-                        <label for="variables_measured" class="form-label">
+                    
+                    <div class="col-md-4 mb-2">
+                        <label for="variables_measured" class="form-label form-label-sm">
                             <i class="fas fa-chart-line"></i> Variables Measured
                         </label>
-                        <select class="form-select" id="variables_measured" name="variables_measured" multiple size="4">
+                        <select class="form-select form-select-sm" id="variables_measured" name="variables_measured" multiple size="3">
                             {% for variable_tuple in filter_options.variables_measured %}
                                 <option value="{{ variable_tuple.0 }}" 
                                         {% if variable_tuple.0 in current_filters.variables_measured %}selected{% endif %}>
@@ -158,21 +164,19 @@
                                 </option>
                             {% endfor %}
                         </select>
-                        <small class="form-text text-muted">Hold Ctrl/Cmd to select multiple</small>
                     </div>
                 </div>
                 
                 <!-- Numeric Filters -->
-                <div class="row">
-                    <!-- Number of Subjects -->
-                    <div class="col-md-6 mb-3">
-                        <label class="form-label">
-                            <i class="fas fa-users"></i> Number of Subjects
+                <div class="row mb-2">
+                    <div class="col-md-3 mb-2">
+                        <label class="form-label form-label-sm">
+                            <i class="fas fa-users"></i> Subjects
                         </label>
-                        <div class="row">
+                        <div class="row g-1">
                             <div class="col-6">
                                 <input type="number" 
-                                       class="form-control" 
+                                       class="form-control form-control-sm" 
                                        name="min_subjects" 
                                        value="{{ current_filters.min_subjects|default:'' }}"
                                        placeholder="Min" 
@@ -180,7 +184,7 @@
                             </div>
                             <div class="col-6">
                                 <input type="number" 
-                                       class="form-control" 
+                                       class="form-control form-control-sm" 
                                        name="max_subjects" 
                                        value="{{ current_filters.max_subjects|default:'' }}"
                                        placeholder="Max" 
@@ -189,15 +193,14 @@
                         </div>
                     </div>
                     
-                    <!-- Number of Files -->
-                    <div class="col-md-6 mb-3">
-                        <label class="form-label">
-                            <i class="fas fa-file"></i> Number of Files
+                    <div class="col-md-3 mb-2">
+                        <label class="form-label form-label-sm">
+                            <i class="fas fa-file"></i> Files
                         </label>
-                        <div class="row">
+                        <div class="row g-1">
                             <div class="col-6">
                                 <input type="number" 
-                                       class="form-control" 
+                                       class="form-control form-control-sm" 
                                        name="min_files" 
                                        value="{{ current_filters.min_files|default:'' }}"
                                        placeholder="Min" 
@@ -205,7 +208,7 @@
                             </div>
                             <div class="col-6">
                                 <input type="number" 
-                                       class="form-control" 
+                                       class="form-control form-control-sm" 
                                        name="max_files" 
                                        value="{{ current_filters.max_files|default:'' }}"
                                        placeholder="Max" 
@@ -213,18 +216,15 @@
                             </div>
                         </div>
                     </div>
-                </div>
-                
-                <div class="row">
-                    <!-- Dataset Size -->
-                    <div class="col-md-6 mb-3">
-                        <label class="form-label">
-                            <i class="fas fa-hdd"></i> Dataset Size (GB)
+                    
+                    <div class="col-md-3 mb-2">
+                        <label class="form-label form-label-sm">
+                            <i class="fas fa-hdd"></i> Size (GB)
                         </label>
-                        <div class="row">
+                        <div class="row g-1">
                             <div class="col-6">
                                 <input type="number" 
-                                       class="form-control" 
+                                       class="form-control form-control-sm" 
                                        name="min_size" 
                                        value="{{ current_filters.min_size|default:'' }}"
                                        placeholder="Min" 
@@ -233,7 +233,7 @@
                             </div>
                             <div class="col-6">
                                 <input type="number" 
-                                       class="form-control" 
+                                       class="form-control form-control-sm" 
                                        name="max_size" 
                                        value="{{ current_filters.max_size|default:'' }}"
                                        placeholder="Max" 
@@ -242,143 +242,100 @@
                             </div>
                         </div>
                     </div>
-                </div>
-                
-                <!-- Date Range Filters -->
-                <div class="row">
-                    <!-- Publication Date Range -->
-                    <div class="col-md-6 mb-3">
-                        <label class="form-label">
-                            <i class="fas fa-calendar-check"></i> Publication Date Range
+                    
+                    <div class="col-md-3 mb-2">
+                        <label class="form-label form-label-sm">
+                            <i class="fas fa-calendar"></i> Pub. Date
                         </label>
-                        <div class="row">
+                        <div class="row g-1">
                             <div class="col-6">
                                 <input type="date" 
-                                       class="form-control" 
+                                       class="form-control form-control-sm" 
                                        name="pub_date_start" 
                                        value="{{ current_filters.pub_date_start|default:'' }}"
                                        title="Start date">
                             </div>
                             <div class="col-6">
                                 <input type="date" 
-                                       class="form-control" 
+                                       class="form-control form-control-sm" 
                                        name="pub_date_end" 
                                        value="{{ current_filters.pub_date_end|default:'' }}"
                                        title="End date">
                             </div>
                         </div>
-                        <small class="form-text text-muted">Filter by when datasets were published</small>
-                    </div>
-                    
-                    <!-- Creation Date Range -->
-                    <div class="col-md-6 mb-3">
-                        <label class="form-label">
-                            <i class="fas fa-calendar-plus"></i> Creation Date Range
-                        </label>
-                        <div class="row">
-                            <div class="col-6">
-                                <input type="date" 
-                                       class="form-control" 
-                                       name="created_date_start" 
-                                       value="{{ current_filters.created_date_start|default:'' }}"
-                                       title="Start date">
-                            </div>
-                            <div class="col-6">
-                                <input type="date" 
-                                       class="form-control" 
-                                       name="created_date_end" 
-                                       value="{{ current_filters.created_date_end|default:'' }}"
-                                       title="End date">
-                            </div>
-                        </div>
-                        <small class="form-text text-muted">Filter by when research was conducted</small>
                     </div>
                 </div>
                 
-                <!-- Asset-Specific Filters Section (Expandable) -->
-                <div class="mb-4">
-                    <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h4 class="mb-0">
-                            <i class="fas fa-file"></i> Asset-Level Filters
-                        </h4>
-                        <button class="btn btn-outline-primary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#assetFilters" aria-expanded="false" aria-controls="assetFilters">
-                            <i class="fas fa-chevron-down"></i> Show Asset Filters
-                        </button>
-                    </div>
-                    
-                    <div class="collapse" id="assetFilters">
-                        <div class="card card-body">
-                            <div class="row">
-                                <!-- Asset Path Search -->
-                                <div class="col-md-6 mb-3">
-                                    <label for="asset_path" class="form-label">
-                                        <i class="fas fa-folder-open"></i> File Path/Name
-                                    </label>
-                                    <input type="text" 
-                                           class="form-control" 
-                                           id="asset_path" 
-                                           name="asset_path" 
-                                           value="{{ current_filters.asset_path|default:'' }}"
-                                           placeholder="Search in file paths and names...">
+                <!-- Asset-Level Filters -->
+                <div class="mb-3">
+                    <h5 class="mb-2">
+                        <i class="fas fa-file"></i> Asset-Level Filters
+                    </h5>
+                    <div class="row">
+                        <!-- Asset Path Search -->
+                        <div class="col-md-4 mb-2">
+                            <label for="asset_path" class="form-label form-label-sm">
+                                <i class="fas fa-folder-open"></i> File Path/Name
+                            </label>
+                            <input type="text" 
+                                   class="form-control form-control-sm" 
+                                   id="asset_path" 
+                                   name="asset_path" 
+                                   value="{{ current_filters.asset_path|default:'' }}"
+                                   placeholder="Search file paths...">
+                        </div>
+                        
+                        <!-- Dandiset ID Filter -->
+                        <div class="col-md-3 mb-2">
+                            <label for="asset_dandiset_id" class="form-label form-label-sm">
+                                <i class="fas fa-database"></i> Dandiset ID
+                            </label>
+                            <input type="text" 
+                                   class="form-control form-control-sm" 
+                                   id="asset_dandiset_id" 
+                                   name="asset_dandiset_id" 
+                                   value="{{ current_filters.asset_dandiset_id|default:'' }}"
+                                   placeholder="e.g., 000001">
+                        </div>
+                        
+                        <!-- Sex Filter -->
+                        <div class="col-md-3 mb-2">
+                            <label for="asset_sex" class="form-label form-label-sm">
+                                <i class="fas fa-venus-mars"></i> Subject Sex
+                            </label>
+                            <select class="form-select form-select-sm" id="asset_sex" name="asset_sex" multiple size="2">
+                                {% for sex in filter_options.sex_types %}
+                                    <option value="{{ sex.id }}" 
+                                            {% if sex.id|stringformat:"s" in current_filters.asset_sex or sex.name in current_filters.asset_sex %}selected{% endif %}>
+                                        {{ sex.name }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        
+                        <!-- Asset File Size Filter -->
+                        <div class="col-md-2 mb-2">
+                            <label class="form-label form-label-sm">
+                                <i class="fas fa-hdd"></i> File Size (MB)
+                            </label>
+                            <div class="row g-1">
+                                <div class="col-6">
+                                    <input type="number" 
+                                           class="form-control form-control-sm" 
+                                           name="asset_min_size" 
+                                           value="{{ current_filters.asset_min_size|default:'' }}"
+                                           placeholder="Min" 
+                                           min="0" 
+                                           step="0.1">
                                 </div>
-                                
-                                <!-- Dandiset ID Filter -->
-                                <div class="col-md-6 mb-3">
-                                    <label for="asset_dandiset_id" class="form-label">
-                                        <i class="fas fa-database"></i> Dandiset ID
-                                    </label>
-                                    <input type="text" 
-                                           class="form-control" 
-                                           id="asset_dandiset_id" 
-                                           name="asset_dandiset_id" 
-                                           value="{{ current_filters.asset_dandiset_id|default:'' }}"
-                                           placeholder="e.g., DANDI:000001 or 000001">
-                                    <small class="form-text text-muted">Filter assets from specific dandisets</small>
-                                </div>
-                            </div>
-                            
-                            <div class="row">
-                                <!-- Sex Filter -->
-                                <div class="col-md-6 mb-3">
-                                    <label for="asset_sex" class="form-label">
-                                        <i class="fas fa-venus-mars"></i> Subject Sex
-                                    </label>
-                                    <select class="form-select" id="asset_sex" name="asset_sex" multiple size="3">
-                                        {% for sex in filter_options.sex_types %}
-                                            <option value="{{ sex.id }}" 
-                                                    {% if sex.id|stringformat:"s" in current_filters.asset_sex or sex.name in current_filters.asset_sex %}selected{% endif %}>
-                                                {{ sex.name }}
-                                            </option>
-                                        {% endfor %}
-                                    </select>
-                                    <small class="form-text text-muted">Filter assets by subject sex. Hold Ctrl/Cmd to select multiple</small>
-                                </div>
-                                
-                                <!-- Asset File Size Filter -->
-                                <div class="col-md-6 mb-3">
-                                    <label class="form-label">
-                                        <i class="fas fa-hdd"></i> Individual File Size (MB)
-                                    </label>
-                                    <div class="row">
-                                        <div class="col-6">
-                                            <input type="number" 
-                                                   class="form-control" 
-                                                   name="asset_min_size" 
-                                                   value="{{ current_filters.asset_min_size|default:'' }}"
-                                                   placeholder="Min" 
-                                                   min="0" 
-                                                   step="0.1">
-                                        </div>
-                                        <div class="col-6">
-                                            <input type="number" 
-                                                   class="form-control" 
-                                                   name="asset_max_size" 
-                                                   value="{{ current_filters.asset_max_size|default:'' }}"
-                                                   placeholder="Max" 
-                                                   min="0" 
-                                                   step="0.1">
-                                        </div>
-                                    </div>
+                                <div class="col-6">
+                                    <input type="number" 
+                                           class="form-control form-control-sm" 
+                                           name="asset_max_size" 
+                                           value="{{ current_filters.asset_max_size|default:'' }}"
+                                           placeholder="Max" 
+                                           min="0" 
+                                           step="0.1">
                                 </div>
                             </div>
                         </div>
@@ -656,10 +613,16 @@ function buildCleanUrl(form) {
                 }
             });
         } else if (element.tagName.toLowerCase() === 'select') {
-            // For single select elements, use the display text
+            // For single select elements, check if it's the order_by dropdown
             if (element.value && element.value.trim() !== '') {
-                const selectedOption = element.options[element.selectedIndex];
-                params.append(element.name, selectedOption.textContent.trim());
+                if (element.name === 'order_by') {
+                    // For order_by, use the value (contains Django field names)
+                    params.append(element.name, element.value);
+                } else {
+                    // For other single selects, use the display text
+                    const selectedOption = element.options[element.selectedIndex];
+                    params.append(element.name, selectedOption.textContent.trim());
+                }
             }
         }
     });
@@ -786,6 +749,7 @@ function loadAssetsPage(dandisetId, page) {
 document.addEventListener('DOMContentLoaded', function() {
     const form = document.getElementById('searchForm');
     const selects = form.querySelectorAll('select[multiple]');
+    const orderBySelect = form.querySelector('#order_by');
     
     // Handle form submission
     form.addEventListener('submit', function(e) {
@@ -794,6 +758,7 @@ document.addEventListener('DOMContentLoaded', function() {
         window.location.href = cleanUrl;
     });
     
+    // Handle multi-select changes
     selects.forEach(select => {
         select.addEventListener('change', function() {
             // Add a small delay to allow multiple selections
@@ -803,6 +768,14 @@ document.addEventListener('DOMContentLoaded', function() {
             }, 100);
         });
     });
+    
+    // Handle order by dropdown change
+    if (orderBySelect) {
+        orderBySelect.addEventListener('change', function() {
+            const cleanUrl = buildCleanUrl(form);
+            window.location.href = cleanUrl;
+        });
+    }
     
     // Handle accordion button clicks to load assets
     document.addEventListener('click', function(e) {

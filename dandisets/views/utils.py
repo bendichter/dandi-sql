@@ -25,7 +25,8 @@ def standardize_species_name(name: Optional[str]) -> Tuple[Optional[str], Option
             if (scientific_part and common_part and 
                 len(scientific_part.split()) >= 2):
                 # Already properly formatted, just return it with proper capitalization
-                formatted_scientific = ' '.join(word.capitalize() for word in scientific_part.split())
+                words = scientific_part.split()
+                formatted_scientific = words[0].capitalize() + ' ' + ' '.join(word.lower() for word in words[1:])
                 formatted_common = common_part  # Keep common name as is
                 return f"{formatted_scientific} - {formatted_common}", formatted_scientific
     
@@ -39,10 +40,12 @@ def standardize_species_name(name: Optional[str]) -> Tuple[Optional[str], Option
         r'\bmouse\b': ('Mus musculus', 'Mouse'),
         r'\bhouse mouse\b': ('Mus musculus', 'Mouse'),
         
-        # Rat variants
+        # Rat variants (including brown rat and compound entries)
         r'\brattus norvegicus\b': ('Rattus norvegicus', 'Rat'),
-        r'\brat\b': ('Rattus norvegicus', 'Rat'),
         r'\bnorway rat\b': ('Rattus norvegicus', 'Rat'),
+        r'\bbrown rat\b': ('Rattus norvegicus', 'Rat'),
+        r'\brats\b': ('Rattus norvegicus', 'Rat'),
+        r'\brat\b': ('Rattus norvegicus', 'Rat'),
         
         # Human variants
         r'\bhomo sapiens\b': ('Homo sapiens', 'Human'),
