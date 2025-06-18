@@ -10,8 +10,27 @@ def standardize_species_name(name: Optional[str]) -> Tuple[Optional[str], Option
     if not name:
         return name, name
     
-    # Convert to lowercase for comparison
-    standardized = name.lower().strip()
+    # Clean the input name
+    cleaned_name = name.strip()
+    
+    # Check if the name is already in "Scientific Name - Common Name" format
+    if ' - ' in cleaned_name:
+        parts = cleaned_name.split(' - ', 1)  # Split on first occurrence only
+        if len(parts) == 2:
+            scientific_part, common_part = parts
+            scientific_part = scientific_part.strip()
+            common_part = common_part.strip()
+            
+            # If both parts exist and scientific part looks like a binomial name (two words)
+            if (scientific_part and common_part and 
+                len(scientific_part.split()) >= 2):
+                # Already properly formatted, just return it with proper capitalization
+                formatted_scientific = ' '.join(word.capitalize() for word in scientific_part.split())
+                formatted_common = common_part  # Keep common name as is
+                return f"{formatted_scientific} - {formatted_common}", formatted_scientific
+    
+    # Convert to lowercase for comparison with patterns
+    standardized = cleaned_name.lower()
     
     # Common standardizations - maps to (scientific_name, common_name)
     standardizations = {
@@ -47,6 +66,10 @@ def standardize_species_name(name: Optional[str]) -> Tuple[Optional[str], Option
         r'\bdanio rerio\b': ('Danio rerio', 'Zebrafish'),
         r'\bzebrafish\b': ('Danio rerio', 'Zebrafish'),
         
+        # Zebra finch variants
+        r'\btaeniopygia guttata\b': ('Taeniopygia guttata', 'Zebra Finch'),
+        r'\bzebra finch\b': ('Taeniopygia guttata', 'Zebra Finch'),
+        
         # C. elegans variants
         r'\bcaenorhabditis elegans\b': ('Caenorhabditis elegans', 'Nematode'),
         r'\bc\. elegans\b': ('Caenorhabditis elegans', 'Nematode'),
@@ -73,6 +96,15 @@ def standardize_species_name(name: Optional[str]) -> Tuple[Optional[str], Option
         # Chicken variants
         r'\bgallus gallus\b': ('Gallus gallus', 'Chicken'),
         r'\bchicken\b': ('Gallus gallus', 'Chicken'),
+        
+        # Marmoset variants
+        r'\bcallithrix jacchus\b': ('Callithrix jacchus', 'Common Marmoset'),
+        r'\bcommon marmoset\b': ('Callithrix jacchus', 'Common Marmoset'),
+        r'\bmarmoset\b': ('Callithrix jacchus', 'Common Marmoset'),
+        
+        # Cynomolgus monkey variants
+        r'\bmacaca fascicularis\b': ('Macaca fascicularis', 'Cynomolgus Monkey'),
+        r'\bcynomolgus monkey\b': ('Macaca fascicularis', 'Cynomolgus Monkey'),
     }
     
     # Apply standardizations
@@ -81,13 +113,19 @@ def standardize_species_name(name: Optional[str]) -> Tuple[Optional[str], Option
             return f"{scientific} - {common}", scientific
     
     # If no standardization found, try to parse if it's already in scientific format
-    title_name = name.title().strip()
+    title_name = cleaned_name.title()
     if ' ' in title_name and len(title_name.split()) >= 2:
-        # Assume it's already a scientific name
-        return f"{title_name} - {title_name}", title_name
-    else:
-        # Single word, treat as common name
-        return f"{title_name} - {title_name}", title_name
+        # Looks like a scientific name (genus species)
+        words = title_name.split()
+        if len(words) >= 2:
+            # Take first two words as genus and species
+            genus = words[0].capitalize()
+            species = words[1].lower()
+            scientific_name = f"{genus} {species}"
+            return f"{scientific_name} - {scientific_name}", scientific_name
+    
+    # Single word, treat as common name and create a placeholder scientific name
+    return f"{title_name} - {title_name}", title_name
 
 
 def get_deduplicated_species() -> List[Dict[str, Any]]:

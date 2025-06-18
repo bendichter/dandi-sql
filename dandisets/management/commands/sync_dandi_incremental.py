@@ -863,8 +863,9 @@ class Command(BaseCommand):
         query = Q(encoding_format='application/x-nwb')
         
         # Filter by dandiset if specified
-        if options.get('dandiset_filter'):
-            dandiset_filter = self._normalize_dandiset_id(options['dandiset_filter'])
+        dandiset_filter = options.get('dandiset_filter') or options.get('dandiset_id')
+        if dandiset_filter:
+            dandiset_filter = self._normalize_dandiset_id(dandiset_filter)
             query &= Q(dandisets__base_id__endswith=dandiset_filter)
             
             if self.verbose:
@@ -880,10 +881,9 @@ class Command(BaseCommand):
         total_assets = nwb_assets.count()
         self.stdout.write(f"Found {total_assets} NWB assets to process")
         
-        # Filter assets that need LINDI processing
-        assets_to_process = []
-        
-        def check_asset_needs_processing(asset):
+        # Combined filtering and processing in a single pass
+        def process_asset_if_needed(asset):
+            # Check if asset needs LINDI processing
             needs_processing = False
             
             # Check if force refresh is enabled
@@ -899,44 +899,24 @@ class Command(BaseCommand):
                     needs_processing = True
             
             if needs_processing:
-                assets_to_process.append(asset)
+                # Process the asset immediately
+                self._process_lindi_for_existing_asset(asset, sync_tracker)
             else:
                 self.stats['lindi_skipped'] += 1
+            
+            self.stats['assets_checked'] += 1
         
-        # Add progress bar for filtering step
+        # Process assets with combined filtering and processing
+        process_desc = "Processing LINDI metadata for assets"
+        
         self._process_with_progress(
             nwb_assets,
-            check_asset_needs_processing,
-            "Filtering assets that need LINDI processing",
+            process_asset_if_needed,
+            process_desc,
             unit="asset",
             postfix_func=lambda asset: {"asset": self._truncate_path(asset.path)},
             leave=True
         )
-        
-        if not assets_to_process:
-            self.stdout.write("No assets need LINDI metadata processing")
-            return
-        
-        self.stdout.write(f"Processing LINDI metadata for {len(assets_to_process)} assets")
-        
-        # Process assets - use parallel processing if not disabled
-        process_desc = "Processing LINDI metadata for assets"
-        
-        if options.get('disable_parallel') or options.get('max_workers', 4) <= 1:
-            # Single-threaded processing
-            if self.no_progress:
-                for asset in assets_to_process:
-                    self._process_lindi_for_existing_asset(asset, sync_tracker)
-                    self.stats['assets_checked'] += 1
-            else:
-                with tqdm(assets_to_process, desc=process_desc, unit="asset") as pbar:
-                    for asset in pbar:
-                        pbar.set_postfix(asset=self._truncate_path(asset.path))
-                        self._process_lindi_for_existing_asset(asset, sync_tracker)
-                        self.stats['assets_checked'] += 1
-        else:
-            # Parallel processing
-            self._process_lindi_parallel(assets_to_process, sync_tracker, options)
 
     def _process_lindi_parallel(self, assets_to_process, sync_tracker, options):
         """Process LINDI metadata for multiple assets in parallel"""
