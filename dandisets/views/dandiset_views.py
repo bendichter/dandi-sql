@@ -108,6 +108,28 @@ def search_dandisets(request):
             def has_next(self):
                 return self.pagination.get('has_next', False)
                 
+            def has_other_pages(self):
+                return self.num_pages > 1
+                
+            def previous_page_number(self):
+                return self.number - 1 if self.has_previous() else None
+                
+            def next_page_number(self):
+                return self.number + 1 if self.has_next() else None
+                
+            @property
+            def paginator(self):
+                # Create a mock paginator with page_range
+                class MockPaginator:
+                    def __init__(self, num_pages):
+                        self.num_pages = num_pages
+                        
+                    @property 
+                    def page_range(self):
+                        return range(1, self.num_pages + 1)
+                
+                return MockPaginator(self.num_pages)
+                
             def __iter__(self):
                 return iter(self.object_list)
         
