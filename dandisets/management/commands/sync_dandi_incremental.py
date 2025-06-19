@@ -1737,7 +1737,7 @@ class Command(BaseCommand):
         except Exception as e:
             if self.verbose:
                 self.stdout.write(f"Error loading about object: {e}")
-            return None
+            return None, None
 
     def _load_access_requirements(self, data):
         """Load access requirements from JSON data."""
