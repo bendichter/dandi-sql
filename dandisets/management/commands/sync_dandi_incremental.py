@@ -481,6 +481,8 @@ class Command(BaseCommand):
             if not api_assets:
                 if self.verbose:
                     self.stdout.write(f"No assets found for {api_dandiset.identifier}")
+                # Even if no API assets, check for deleted assets
+                self._check_for_deleted_assets_in_dandiset(local_dandiset, [], options)
                 return
             
             # Apply max assets limit
@@ -511,6 +513,9 @@ class Command(BaseCommand):
             
             if self.verbose and assets_updated > 0:
                 self.stdout.write(f"Updated {assets_updated} assets for {api_dandiset.identifier}")
+            
+            # Check for deleted assets in this dandiset
+            self._check_for_deleted_assets_in_dandiset(local_dandiset, api_assets, options)
                 
         except Exception as e:
             self.stats['errors'] += 1
@@ -1243,6 +1248,86 @@ class Command(BaseCommand):
             self.stats['errors'] += 1
             if self.verbose:
                 self.stdout.write(f"Error checking for deleted dandisets: {e}")
+
+    def _check_for_deleted_assets_in_dandiset(self, local_dandiset, api_assets, options):
+        """Check for assets that exist locally but not in the API for this specific dandiset"""
+        try:
+            # Create set of API asset IDs for fast lookup
+            api_asset_ids = set()
+            for api_asset in api_assets:
+                try:
+                    metadata = api_asset.get_raw_metadata()
+                    asset_id = metadata.get('identifier', '')
+                    if not asset_id and metadata.get('id'):
+                        full_id = metadata.get('id', '')
+                        if ':' in full_id:
+                            asset_id = full_id.split(':', 1)[1]
+                        else:
+                            asset_id = full_id
+                    if asset_id:
+                        api_asset_ids.add(asset_id)
+                except Exception as e:
+                    if self.verbose:
+                        self.stdout.write(f"Error getting asset ID from API asset: {e}")
+                    continue
+            
+            # Get all local assets that belong to this dandiset
+            local_assets = local_dandiset.assets.all()
+            
+            assets_to_delete = []
+            
+            for local_asset in local_assets:
+                if local_asset.dandi_asset_id not in api_asset_ids:
+                    # Check if this asset belongs to other dandisets before adding to deletion list
+                    if local_asset.dandisets.count() == 1:
+                        # Asset only belongs to this dandiset - safe to delete completely
+                        assets_to_delete.append(('delete_asset', local_asset))
+                        if self.verbose:
+                            self.stdout.write(f"Asset {local_asset.dandi_asset_id} will be deleted (only belongs to {local_dandiset.base_id})")
+                    else:
+                        # Asset belongs to multiple dandisets - only remove the relationship
+                        assets_to_delete.append(('remove_relationship', local_asset))
+                        if self.verbose:
+                            self.stdout.write(f"Asset {local_asset.dandi_asset_id} relationship will be removed from {local_dandiset.base_id} (belongs to multiple dandisets)")
+            
+            if not assets_to_delete:
+                if self.verbose:
+                    self.stdout.write(f"No deleted assets found in dandiset {local_dandiset.base_id}")
+                return
+            
+            if self.verbose:
+                self.stdout.write(f"Found {len(assets_to_delete)} assets to process for deletion in dandiset {local_dandiset.base_id}")
+            
+            # Process the assets
+            for action, asset in assets_to_delete:
+                if self.dry_run:
+                    if action == 'delete_asset':
+                        if self.verbose:
+                            self.stdout.write(f"Would delete asset: {asset.path}")
+                    else:
+                        if self.verbose:
+                            self.stdout.write(f"Would remove relationship for asset: {asset.path}")
+                    self.stats['assets_deleted'] += 1
+                else:
+                    with transaction.atomic():
+                        if action == 'delete_asset':
+                            if self.verbose:
+                                self.stdout.write(f"Deleting asset: {asset.path}")
+                            asset.delete()
+                        else:
+                            if self.verbose:
+                                self.stdout.write(f"Removing relationship for asset: {asset.path}")
+                            AssetDandiset.objects.filter(
+                                asset=asset,
+                                dandiset=local_dandiset
+                            ).delete()
+                        
+                        self.stats['assets_deleted'] += 1
+                        
+        except Exception as e:
+            self.stats['errors'] += 1
+            if self.verbose:
+                self.stdout.write(f"Error checking for deleted assets in dandiset {local_dandiset.base_id}: {e}")
 
     def _extract_base_id(self, identifier):
         """Extract base ID from a dandiset identifier"""
