@@ -37,9 +37,11 @@ class Command(BaseCommand):
             'dandisets_checked': 0,
             'dandisets_updated': 0,
             'dandisets_skipped': 0,
+            'dandisets_deleted': 0,
             'assets_checked': 0,
             'assets_updated': 0,
             'assets_skipped': 0,
+            'assets_deleted': 0,
             'lindi_processed': 0,
             'lindi_skipped': 0,
             'lindi_errors': 0,
@@ -52,6 +54,9 @@ class Command(BaseCommand):
         self.session.headers.update({
             'User-Agent': 'dandi-sql-unified-sync/1.0'
         })
+        # Cache for API dandisets to avoid multiple expensive API calls
+        self._api_dandisets_cache = None
+        self._api_dandisets_dict_cache = None
 
     def normalize_uberon_identifier(self, identifier: Optional[str]) -> Optional[str]:
         """Normalize UBERON identifiers to standard format"""
@@ -81,6 +86,21 @@ class Command(BaseCommand):
         
         # Pad with zeros if needed (e.g., 3 -> 000003)
         return dandiset_id.zfill(6)
+
+    def _get_api_dandisets(self):
+        """Get all dandisets from API with caching to avoid multiple expensive calls"""
+        if self._api_dandisets_cache is None:
+            if self.verbose:
+                self.stdout.write("Fetching all dandisets from DANDI API (cached for this sync)...")
+            self._api_dandisets_cache = list(self.client.get_dandisets())
+        return self._api_dandisets_cache
+
+    def _get_api_dandisets_dict(self):
+        """Get API dandisets as a dictionary keyed by identifier for fast lookup"""
+        if self._api_dandisets_dict_cache is None:
+            api_dandisets = self._get_api_dandisets()
+            self._api_dandisets_dict_cache = {ds.identifier: ds for ds in api_dandisets}
+        return self._api_dandisets_dict_cache
 
     def _process_with_progress(self, items, process_func, description, unit="item", postfix_func=None, leave=True):
         """Generic function to process items with optional progress bar
@@ -220,6 +240,11 @@ class Command(BaseCommand):
             action='store_true',
             help='Disable parallel processing (use single-threaded mode)',
         )
+        parser.add_argument(
+            '--skip-deletions',
+            action='store_true',
+            help='Skip detecting and deleting dandisets that no longer exist in DANDI',
+        )
 
     def handle(self, *args, **options):
         self.dry_run = options['dry_run']
@@ -267,6 +292,10 @@ class Command(BaseCommand):
             else:
                 # Perform unified sync - iterate through dandisets and handle both metadata and assets
                 self._sync_dandisets_and_assets(last_sync_time, options, sync_scope, sync_tracker)
+                
+                # Check for deleted dandisets unless skipped or processing specific dandiset
+                if not options.get('skip_deletions', False) and not options.get('dandiset_id'):
+                    self._check_for_deleted_dandisets(options, sync_tracker)
             
             # Record sync completion
             end_time = time.time()
@@ -1128,8 +1157,10 @@ class Command(BaseCommand):
         self.stdout.write(f"Duration: {duration:.2f} seconds")
         self.stdout.write(f"Dandisets checked: {self.stats['dandisets_checked']}")
         self.stdout.write(f"Dandisets updated: {self.stats['dandisets_updated']}")
+        self.stdout.write(f"Dandisets deleted: {self.stats['dandisets_deleted']}")
         self.stdout.write(f"Assets checked: {self.stats['assets_checked']}")
         self.stdout.write(f"Assets updated: {self.stats['assets_updated']}")
+        self.stdout.write(f"Assets deleted: {self.stats['assets_deleted']}")
         
         # Show LINDI statistics only if LINDI processing was enabled
         if not self.options.get('skip_lindi', False):
@@ -1143,6 +1174,86 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("DRY RUN - No changes were made"))
         else:
             self.stdout.write(self.style.SUCCESS("Unified sync completed successfully"))
+
+    def _check_for_deleted_dandisets(self, options, sync_tracker=None):
+        """Check for dandisets that exist locally but not in DANDI API and delete them"""
+        self.stdout.write("Checking for deleted dandisets...")
+        
+        try:
+            # Get all dandisets from DANDI API (using cache)
+            api_dandisets = self._get_api_dandisets()
+            api_dandiset_ids = {self._extract_base_id(ds.identifier) for ds in api_dandisets}
+            
+            # Get all local dandisets that are marked as latest
+            local_dandisets = Dandiset.objects.filter(is_latest=True)
+            
+            dandisets_to_delete = []
+            
+            def check_local_dandiset(local_dandiset):
+                local_base_id = self._extract_base_id(local_dandiset.base_id)
+                if local_base_id not in api_dandiset_ids:
+                    dandisets_to_delete.append(local_dandiset)
+                    if self.verbose:
+                        self.stdout.write(f"Dandiset {local_dandiset.base_id} no longer exists in DANDI API")
+            
+            # Check all local dandisets
+            self._process_with_progress(
+                local_dandisets,
+                check_local_dandiset,
+                "Checking for deleted dandisets",
+                unit="dandiset",
+                postfix_func=lambda ds: {"checking": ds.base_id}
+            )
+            
+            if not dandisets_to_delete:
+                self.stdout.write("No deleted dandisets found")
+                return
+            
+            self.stdout.write(f"Found {len(dandisets_to_delete)} dandisets to delete")
+            
+            def delete_dandiset(dandiset):
+                if self.dry_run:
+                    if self.verbose:
+                        self.stdout.write(f"Would delete dandiset: {dandiset.base_id}")
+                    self.stats['dandisets_deleted'] += 1
+                else:
+                    if self.verbose:
+                        self.stdout.write(f"Deleting dandiset: {dandiset.base_id}")
+                    
+                    with transaction.atomic():
+                        # Also delete related assets that only belong to this dandiset
+                        for asset in dandiset.assets.all():
+                            if asset.dandisets.count() == 1:  # Only belongs to this dandiset
+                                asset.delete()
+                                self.stats['assets_deleted'] += 1
+                        
+                        dandiset.delete()
+                        self.stats['dandisets_deleted'] += 1
+            
+            # Delete dandisets
+            self._process_with_progress(
+                dandisets_to_delete,
+                delete_dandiset,
+                "Deleting dandisets",
+                unit="dandiset",
+                postfix_func=lambda ds: {"deleting": ds.base_id}
+            )
+            
+        except Exception as e:
+            self.stats['errors'] += 1
+            if self.verbose:
+                self.stdout.write(f"Error checking for deleted dandisets: {e}")
+
+    def _extract_base_id(self, identifier):
+        """Extract base ID from a dandiset identifier"""
+        if not identifier:
+            return None
+        
+        # Handle formats like "DANDI:000003" or "000003" 
+        if identifier.startswith('DANDI:'):
+            return identifier[6:].zfill(6)
+        else:
+            return identifier.zfill(6)
 
     # Include all the helper methods from load_sample_data.py for loading data
     def _load_dandiset(self, data, sync_tracker=None):
