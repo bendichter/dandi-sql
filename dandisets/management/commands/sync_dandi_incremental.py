@@ -1616,7 +1616,7 @@ class Command(BaseCommand):
                 existing_contributors = Contributor.objects.filter(identifier=identifier)
                 if existing_contributors.exists():
                     contributor = existing_contributors.first()
-                    if self.verbose:
+                    if self.verbose and contributor:
                         self.stdout.write(f"Found existing contributor by identifier {identifier}: {contributor.name}")
             
             # If no contributor found by identifier, try by email (if provided)
@@ -1624,7 +1624,7 @@ class Command(BaseCommand):
                 existing_contributors = Contributor.objects.filter(email=email)
                 if existing_contributors.exists():
                     contributor = existing_contributors.first()
-                    if self.verbose:
+                    if self.verbose and contributor:
                         self.stdout.write(f"Found existing contributor by email {email}: {contributor.name}")
             
             # If no contributor found by identifier or email, try by name
