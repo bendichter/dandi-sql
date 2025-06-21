@@ -2,7 +2,7 @@ from django.urls import path
 from .views.sync_views import trigger_sync
 from .views.mcp_views import mcp_server
 from .views.dandiset_views import search_dandisets, dandiset_detail
-from .views.api_views import api_filter_options, api_search, api_asset_search
+from .views.api_views import api_filter_options, api_search, api_asset_search, api_dandiset_assets
 from .sql_api import sql_execute, sql_validate, sql_schema
 
 app_name = 'dandisets'
@@ -17,6 +17,7 @@ urlpatterns = [
     # API endpoints
     path('api/search/', api_search, name='api_search'),
     path('api/assets/', api_asset_search, name='api_asset_search'),
+    path('api/dandisets/<str:dandiset_id>/assets/', api_dandiset_assets, name='api_dandiset_assets'),
     path('api/filter-options/', api_filter_options, name='api_filter_options'),
     
     # MCP server endpoint
