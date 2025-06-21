@@ -183,6 +183,9 @@ def get_filter_options() -> Dict[str, Any]:
     # Get unique variables measured from the database
     variables_measured = get_unique_variables_measured()
     
+    # Get unique file formats from the database
+    file_formats = get_unique_file_formats()
+    
     return {
         'species': get_deduplicated_species()[:50],  # Deduplicated species
         'anatomy': Anatomy.objects.all().order_by('name')[:50],  # Limit for demo
@@ -191,6 +194,7 @@ def get_filter_options() -> Dict[str, Any]:
         'data_standards': StandardsType.objects.all().order_by('name')[:50],  # Limit for demo
         'variables_measured': variables_measured[:50],  # Limit for demo
         'sex_types': SexType.objects.all().order_by('name'),  # Sex types for asset filtering
+        'file_formats': file_formats,  # Dynamic file formats from the database
     }
 
 
@@ -233,6 +237,54 @@ def get_unique_variables_measured() -> List[Tuple[str, str]]:
     variables_list = [(var, var) for var in sorted(variables_set)]
     
     return variables_list
+
+
+def get_unique_file_formats() -> List[Dict[str, str]]:
+    """Get unique file formats from all assets in the database"""
+    from ..models import Asset
+    
+    # Get distinct encoding formats from assets, excluding empty/null values
+    formats = Asset.objects.exclude(
+        encoding_format__isnull=True
+    ).exclude(
+        encoding_format__exact=''
+    ).values_list(
+        'encoding_format', flat=True
+    ).distinct().order_by('encoding_format')
+    
+    # Create a mapping for better display names
+    format_display_names = {
+        # 'application/x-nwb': 'NWB',
+        # 'application/x-hdf5': 'HDF5', 
+        # 'image/tiff': 'TIFF',
+        # 'video/mp4': 'MP4',
+        # 'application/json': 'JSON',
+        # 'text/plain': 'Text',
+        # 'application/pdf': 'PDF',
+        # 'image/png': 'PNG',
+        # 'image/jpeg': 'JPEG',
+        # 'video/avi': 'AVI',
+        # 'application/zip': 'ZIP',
+        # 'text/csv': 'CSV',
+        # 'application/x-matlab-data': 'MATLAB',
+        # 'application/x-pickle': 'Pickle',
+        # 'application/x-tar': 'TAR',
+        # 'video/quicktime': 'QuickTime',
+        # 'image/gif': 'GIF',
+    }
+    
+    # Convert to list of dictionaries for easier template access
+    file_formats = []
+    for format_value in formats:
+        if format_value:
+            # Use custom display name if available, otherwise use the format value itself
+            display_name = format_display_names.get(format_value, format_value)
+            file_formats.append({
+                'value': format_value,
+                'display_name': display_name
+            })
+    
+    return file_formats
 
 
 def get_dandiset_stats(queryset: QuerySet) -> Dict[str, Any]:

@@ -357,10 +357,52 @@ def perform_dandiset_search(request_params) -> Dict[str, Any]:
     if has_asset_filters and not file_formats:
         dandisets = dandisets.filter(assets__in=Asset.objects.filter(asset_query)).distinct()
     elif has_asset_filters and file_formats:
-        # If we have file formats plus other asset filters, combine them
-        other_asset_query = asset_query & ~Q(encoding_format__in=file_formats)  # Remove file format from asset query
-        if other_asset_query != Q():
+        # Check if we have other asset filters besides file format
+        non_file_format_filters = []
+        if asset_path_search:
+            non_file_format_filters.append(Q(path__icontains=asset_path_search))
+        if asset_min_size:
+            try:
+                min_size_bytes = float(asset_min_size) * 1024 * 1024
+                non_file_format_filters.append(Q(content_size__gte=min_size_bytes))
+            except (ValueError, TypeError):
+                pass
+        if asset_max_size:
+            try:
+                max_size_bytes = float(asset_max_size) * 1024 * 1024
+                non_file_format_filters.append(Q(content_size__lte=max_size_bytes))
+            except (ValueError, TypeError):
+                pass
+        if asset_sex_params:
+            from ..models import SexType
+            sex_ids = []
+            for param in asset_sex_params:
+                try:
+                    if param.isdigit():
+                        sex_ids.append(int(param))
+                    else:
+                        sex = SexType.objects.filter(name=param).first()
+                        if sex:
+                            sex_ids.append(sex.pk)
+                except (ValueError, TypeError):
+                    continue
+            if sex_ids:
+                non_file_format_filters.append(Q(attributed_to__participant__sex__id__in=sex_ids))
+        if asset_dandiset_id:
+            if asset_dandiset_id.startswith('DANDI:'):
+                dandiset_number = asset_dandiset_id[6:]
+            else:
+                dandiset_number = asset_dandiset_id
+            non_file_format_filters.append(Q(dandisets__base_id__icontains=dandiset_number))
+        
+        # If we have other asset filters besides file format, apply them
+        if non_file_format_filters:
+            other_asset_query = Q()
+            for filter_q in non_file_format_filters:
+                other_asset_query &= filter_q
+            # Apply additional filters to the already file-format-filtered dandisets
             dandisets = dandisets.filter(assets__in=Asset.objects.filter(other_asset_query)).distinct()
+        # If no other asset filters, keep the dandisets as already filtered by file format above
     
     # Apply ordering
     order_by = request_params.get('order_by', '-date_published')
@@ -427,6 +469,7 @@ def api_filter_options(request: HttpRequest) -> JsonResponse:
         'data_standards': [{'id': d.id, 'name': d.name, 'identifier': getattr(d, 'identifier', '')} for d in options['data_standards']],
         'variables_measured': options.get('variables_measured', []),
         'sex_types': [{'id': s.id, 'name': s.name} for s in options.get('sex_types', [])],
+        'file_formats': options.get('file_formats', []),
     }
     
     return JsonResponse(data)

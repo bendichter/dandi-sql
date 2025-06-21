@@ -110,31 +110,17 @@
                 
                 <!-- Technical & Data Filters -->
                 <div class="row mb-2">
-                    <div class="col-md-4 mb-2">
+                    <div class="col-md-3 mb-2">
                         <label for="file_format" class="form-label form-label-sm">
                             <i class="fas fa-file-code"></i> File Format
                         </label>
                         <select class="form-select form-select-sm" id="file_format" name="file_format" multiple size="3">
-                            <option value="application/x-nwb" 
-                                    {% if 'application/x-nwb' in current_filters.file_format %}selected{% endif %}>
-                                NWB
-                            </option>
-                            <option value="application/x-hdf5" 
-                                    {% if 'application/x-hdf5' in current_filters.file_format %}selected{% endif %}>
-                                HDF5
-                            </option>
-                            <option value="image/tiff" 
-                                    {% if 'image/tiff' in current_filters.file_format %}selected{% endif %}>
-                                TIFF
-                            </option>
-                            <option value="video/mp4" 
-                                    {% if 'video/mp4' in current_filters.file_format %}selected{% endif %}>
-                                MP4
-                            </option>
-                            <option value="application/json" 
-                                    {% if 'application/json' in current_filters.file_format %}selected{% endif %}>
-                                JSON
-                            </option>
+                            {% for format_dict in filter_options.file_formats %}
+                                <option value="{{ format_dict.value }}" 
+                                        {% if format_dict.value in current_filters.file_format %}selected{% endif %}>
+                                    {{ format_dict.display_name }}
+                                </option>
+                            {% endfor %}
                         </select>
                     </div>
                     
@@ -610,11 +596,16 @@ function buildCleanUrl(form) {
                 params.append(element.name, element.value.trim());
             }
         } else if (element.tagName.toLowerCase() === 'select' && element.multiple) {
-            // For multi-select elements, add each selected option using the display text
+            // For multi-select elements, add each selected option
             const selectedOptions = Array.from(element.selectedOptions);
             selectedOptions.forEach(option => {
                 if (option.value) {
-                    params.append(element.name, option.textContent.trim());
+                    // For file_format, use the actual value (MIME type), for others use display text
+                    if (element.name === 'file_format') {
+                        params.append(element.name, option.value);
+                    } else {
+                        params.append(element.name, option.textContent.trim());
+                    }
                 }
             });
         } else if (element.tagName.toLowerCase() === 'select') {
