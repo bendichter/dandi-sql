@@ -118,42 +118,6 @@
             </div>
         </div>
         
-        <!-- Example Queries -->
-        <div class="mb-4">
-            <h3>Example Queries</h3>
-            <div class="accordion" id="exampleQueriesAccordion">
-                {% for example in example_queries %}
-                <div class="accordion-item">
-                    <h2 class="accordion-header" id="exampleHeading{{ forloop.counter }}">
-                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#exampleCollapse{{ forloop.counter }}" aria-expanded="false" aria-controls="exampleCollapse{{ forloop.counter }}">
-                            <i class="fas fa-code text-primary me-2"></i>
-                            <strong>{{ example.name }}</strong>
-                            <small class="text-muted ms-2">- {{ example.description }}</small>
-                        </button>
-                    </h2>
-                    <div id="exampleCollapse{{ forloop.counter }}" class="accordion-collapse collapse" aria-labelledby="exampleHeading{{ forloop.counter }}" data-bs-parent="#exampleQueriesAccordion">
-                        <div class="accordion-body">
-                            <p class="text-muted mb-3">{{ example.description }}</p>
-                            <pre class="bg-light p-3 rounded" style="font-size: 0.9em; overflow-x: auto;"><code>{{ example.sql }}</code></pre>
-                            <button type="button" class="btn btn-sm btn-outline-primary load-example" data-sql="{{ example.sql }}">
-                                <i class="fas fa-copy"></i> Load This Example
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-        </div>
-        
-        <!-- Hidden data for JavaScript -->
-        {% if results %}
-        <script id="results-data" type="application/json">{{ results|escapejs }}</script>
-        <script id="columns-data" type="application/json">{{ metadata.columns|escapejs }}</script>
-        {% if all_results %}
-        <script id="all-results-data" type="application/json">{{ all_results|escapejs }}</script>
-        {% endif %}
-        {% endif %}
-
         <!-- Query Results -->
         {% if results is not None or error %}
         <div class="results-section">
@@ -298,6 +262,42 @@
                 {% endif %}
             {% endif %}
         </div>
+        {% endif %}
+        
+        <!-- Example Queries -->
+        <div class="mb-4">
+            <h3>Example Queries</h3>
+            <div class="accordion" id="exampleQueriesAccordion">
+                {% for example in example_queries %}
+                <div class="accordion-item">
+                    <h2 class="accordion-header" id="exampleHeading{{ forloop.counter }}">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#exampleCollapse{{ forloop.counter }}" aria-expanded="false" aria-controls="exampleCollapse{{ forloop.counter }}">
+                            <i class="fas fa-code text-primary me-2"></i>
+                            <strong>{{ example.name }}</strong>
+                            <small class="text-muted ms-2">- {{ example.description }}</small>
+                        </button>
+                    </h2>
+                    <div id="exampleCollapse{{ forloop.counter }}" class="accordion-collapse collapse" aria-labelledby="exampleHeading{{ forloop.counter }}" data-bs-parent="#exampleQueriesAccordion">
+                        <div class="accordion-body">
+                            <p class="text-muted mb-3">{{ example.description }}</p>
+                            <pre class="bg-light p-3 rounded" style="font-size: 0.9em; overflow-x: auto;"><code>{{ example.sql }}</code></pre>
+                            <button type="button" class="btn btn-sm btn-outline-primary load-example" data-sql="{{ example.sql }}">
+                                <i class="fas fa-copy"></i> Load This Example
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        
+        <!-- Hidden data for JavaScript -->
+        {% if results %}
+        <script id="results-data" type="application/json">{{ results_json|safe }}</script>
+        <script id="columns-data" type="application/json">{{ columns_json|safe }}</script>
+        {% if all_results_json %}
+        <script id="all-results-data" type="application/json">{{ all_results_json|safe }}</script>
+        {% endif %}
         {% endif %}
     </div>
 </div>

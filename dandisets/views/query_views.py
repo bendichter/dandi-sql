@@ -74,6 +74,10 @@ def sql_query_interface(request):
                             'end_result': min(end_idx, total_results),
                         },
                         'all_results': result['results'],  # For export functionality
+                        # JSON-encoded data for JavaScript
+                        'results_json': json.dumps(paginated_results),
+                        'columns_json': json.dumps(result['metadata']['columns']),
+                        'all_results_json': json.dumps(result['results']),
                     })
                     
                     # Add success message
