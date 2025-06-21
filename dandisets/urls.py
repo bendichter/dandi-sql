@@ -3,6 +3,7 @@ from .views.sync_views import trigger_sync
 from .views.mcp_views import mcp_server
 from .views.dandiset_views import search_dandisets, dandiset_detail
 from .views.api_views import api_filter_options, api_search, api_asset_search, api_dandiset_assets
+from .views.query_views import sql_query_interface, sql_query_ajax, sql_validate_ajax
 from .sql_api import sql_execute, sql_validate, sql_schema
 
 app_name = 'dandisets'
@@ -25,6 +26,11 @@ urlpatterns = [
     
     # Sync API endpoint
     path('api/sync/trigger/', trigger_sync, name='api_sync_trigger'),
+    
+    # SQL Query Interface
+    path('sql/', sql_query_interface, name='sql_query_interface'),
+    path('api/sql/query-ajax/', sql_query_ajax, name='sql_query_ajax'),
+    path('api/sql/validate-ajax/', sql_validate_ajax, name='sql_validate_ajax'),
     
     # Direct SQL API endpoints (kept for backward compatibility)
     path('api/sql/execute/', sql_execute, name='sql_execute'),

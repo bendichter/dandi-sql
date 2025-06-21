@@ -1,348 +1,270 @@
 """
-API views for the JSON Query Builder.
+Custom SQL query interface views.
 
-Provides REST endpoints for executing complex queries, validating queries,
-and getting schema information.
+Provides a web interface for executing custom SQL queries with the same
+validation and security as the MCP server.
 """
 
 import json
 import logging
+from django.shortcuts import render
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
-from django.utils.decorators import method_decorator
-from django.views import View
-from django.core.serializers import serialize
-from django.forms.models import model_to_dict
+from django.contrib import messages
 
-from ..query import QueryExecutor
-from ..query.schema import QuerySchema
+from ..sql_api import execute_sql_query, SQLSecurityValidator
 
 logger = logging.getLogger(__name__)
 
 
-def serialize_query_results(results, model_name):
+def sql_query_interface(request):
     """
-    Serialize query results to JSON-compatible format.
+    Display the custom SQL query interface.
     
-    Args:
-        results: List of model instances or dictionaries (from values())
-        model_name: Name of the model
+    GET: Show the query form
+    POST: Execute the SQL query and show results
+    """
+    context = {
+        'query': '',
+        'results': None,
+        'error': None,
+        'execution_time': None,
+        'example_queries': get_example_queries(),
+        'allowed_tables': get_allowed_tables(),
+    }
+    
+    if request.method == 'POST':
+        sql_query = request.POST.get('sql', '').strip()
+        page = int(request.POST.get('page', 1))
         
-    Returns:
-        List of serialized objects
-    """
-    serialized_results = []
-    
-    for obj in results:
-        try:
-            # Check if obj is already a dictionary (from values() queryset)
-            if isinstance(obj, dict):
-                obj_dict = obj.copy()
-                
-                # Handle special field types in dictionary values
-                for key, value in obj_dict.items():
-                    # Convert datetime objects to ISO strings
-                    if hasattr(value, 'isoformat'):
-                        obj_dict[key] = value.isoformat()
-                    # Convert UUID objects to strings
-                    elif hasattr(value, 'hex'):
-                        obj_dict[key] = str(value)
-                
-                serialized_results.append(obj_dict)
-            else:
-                # Handle model instances
-                obj_dict = model_to_dict(obj)
-                
-                # Handle special field types
-                for key, value in obj_dict.items():
-                    # Convert datetime objects to ISO strings
-                    if hasattr(value, 'isoformat'):
-                        obj_dict[key] = value.isoformat()
-                    # Convert UUID objects to strings
-                    elif hasattr(value, 'hex'):
-                        obj_dict[key] = str(value)
-                
-                # Add the primary key if not already included
-                if 'id' not in obj_dict and hasattr(obj, 'pk'):
-                    obj_dict['id'] = obj.pk
-                
-                serialized_results.append(obj_dict)
-            
-        except Exception as e:
-            # Fallback serialization
-            logger.warning(f"Error serializing object {obj}: {e}")
+        if sql_query:
             try:
-                if isinstance(obj, dict):
-                    # For dict objects, just convert problematic values to strings
-                    safe_dict = {}
-                    for key, value in obj.items():
-                        try:
-                            json.dumps(value)  # Test if value is JSON serializable
-                            safe_dict[key] = value
-                        except:
-                            safe_dict[key] = str(value)
-                    serialized_results.append(safe_dict)
+                # Execute the query using the same function as MCP
+                result = execute_sql_query(sql_query)
+                
+                if result['success']:
+                    # Pagination logic
+                    per_page = 20
+                    total_results = len(result['results'])
+                    total_pages = max(1, (total_results + per_page - 1) // per_page)
+                    
+                    # Ensure page is within bounds
+                    page = max(1, min(page, total_pages))
+                    
+                    # Calculate pagination slice
+                    start_idx = (page - 1) * per_page
+                    end_idx = start_idx + per_page
+                    paginated_results = result['results'][start_idx:end_idx]
+                    
+                    context.update({
+                        'results': paginated_results,
+                        'metadata': result['metadata'],
+                        'query': sql_query,
+                        'pagination': {
+                            'current_page': page,
+                            'total_pages': total_pages,
+                            'total_results': total_results,
+                            'per_page': per_page,
+                            'has_previous': page > 1,
+                            'has_next': page < total_pages,
+                            'previous_page': page - 1 if page > 1 else None,
+                            'next_page': page + 1 if page < total_pages else None,
+                            'start_result': start_idx + 1,
+                            'end_result': min(end_idx, total_results),
+                        },
+                        'all_results': result['results'],  # For export functionality
+                    })
+                    
+                    # Add success message
+                    messages.success(request, f"Query executed successfully. {total_results} rows returned, showing page {page} of {total_pages}.")
                 else:
-                    # Use Django's built-in serializer as fallback for model instances
-                    serialized = serialize('json', [obj])
-                    parsed = json.loads(serialized)[0]['fields']
-                    parsed['id'] = obj.pk
-                    serialized_results.append(parsed)
-            except Exception as e2:
-                logger.error(f"Failed to serialize object {obj}: {e2}")
-                serialized_results.append({'id': getattr(obj, 'pk', None), 'error': 'Serialization failed'})
+                    context['error'] = result['error']
+                    context['query'] = sql_query
+                    messages.error(request, f"Query failed: {result['error']}")
+                    
+            except Exception as e:
+                context['error'] = str(e)
+                context['query'] = sql_query
+                messages.error(request, f"Unexpected error: {str(e)}")
+        else:
+            context['error'] = "Please enter a SQL query."
+            messages.error(request, "Please enter a SQL query.")
     
-    return serialized_results
+    return render(request, 'dandisets/sql_query.html', context)
 
 
-@method_decorator(csrf_exempt, name='dispatch')
-class QueryAPIView(View):
-    """Main API view for executing JSON queries."""
+@csrf_exempt
+@require_http_methods(["POST"])
+def sql_query_ajax(request):
+    """
+    AJAX endpoint for executing SQL queries.
     
-    def post(self, request):
-        """
-        Execute a JSON query.
-        
-        Expected JSON body:
-        {
-            "model": "Dandiset",
-            "fields": ["id", "name", "description"],
-            "filters": {"name__icontains": "mouse"},
-            "annotations": {...},
-            "order_by": ["name"],
-            "limit": 10,
-            "offset": 0
-        }
-        """
+    Returns JSON response with results or error.
+    """
+    try:
+        # Parse request body
         try:
-            # Parse JSON body
-            try:
-                query_json = json.loads(request.body)
-            except json.JSONDecodeError as e:
-                return JsonResponse({
-                    'success': False,
-                    'error': f'Invalid JSON: {str(e)}',
-                    'results': []
-                }, status=400)
-            
-            # Execute the query
-            result = QueryExecutor.execute(query_json)
-            
-            if result['success']:
-                # Serialize the results
-                serialized_results = serialize_query_results(
-                    result['results'], 
-                    query_json.get('model', 'Unknown')
-                )
-                
-                response_data = {
-                    'success': True,
-                    'results': serialized_results,
-                    'metadata': result['metadata'],
-                    'query': query_json
-                }
-                
-                return JsonResponse(response_data)
-            else:
-                return JsonResponse({
-                    'success': False,
-                    'error': result['metadata'].get('error', 'Unknown error'),
-                    'results': [],
-                    'query': query_json
-                }, status=400)
-                
-        except Exception as e:
-            logger.error(f"Query API error: {str(e)}")
+            body = json.loads(request.body)
+            sql = body.get('sql', '').strip()
+        except json.JSONDecodeError:
             return JsonResponse({
                 'success': False,
-                'error': f'Internal server error: {str(e)}',
-                'results': []
-            }, status=500)
-
-
-@method_decorator(csrf_exempt, name='dispatch')
-class QueryValidateAPIView(View):
-    """API view for validating queries without executing them."""
-    
-    def post(self, request):
-        """
-        Validate a JSON query.
+                'error': 'Invalid JSON in request body'
+            }, status=400)
         
-        Returns validation results without executing the query.
-        """
+        if not sql:
+            return JsonResponse({
+                'success': False,
+                'error': 'No SQL query provided'
+            }, status=400)
+        
+        # Execute the query
+        result = execute_sql_query(sql)
+        
+        status_code = 200 if result['success'] else 400
+        return JsonResponse(result, status=status_code)
+        
+    except Exception as e:
+        logger.error(f"SQL AJAX error: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': f'Internal server error: {str(e)}'
+        }, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def sql_validate_ajax(request):
+    """
+    AJAX endpoint for validating SQL queries without executing them.
+    
+    Returns JSON response with validation result.
+    """
+    try:
+        # Parse request body
         try:
-            # Parse JSON body
-            try:
-                query_json = json.loads(request.body)
-            except json.JSONDecodeError as e:
-                return JsonResponse({
-                    'valid': False,
-                    'error': f'Invalid JSON: {str(e)}'
-                }, status=400)
-            
-            # Validate the query
-            validation_result = QueryExecutor.validate_query(query_json)
-            
-            return JsonResponse(validation_result)
-            
-        except Exception as e:
-            logger.error(f"Query validation error: {str(e)}")
+            body = json.loads(request.body)
+            sql = body.get('sql', '').strip()
+        except json.JSONDecodeError:
             return JsonResponse({
                 'valid': False,
-                'error': f'Validation error: {str(e)}'
-            }, status=500)
-
-
-@method_decorator(csrf_exempt, name='dispatch')
-class QueryExplainAPIView(View):
-    """API view for getting query execution plans."""
-    
-    def post(self, request):
-        """
-        Get the execution plan for a query.
+                'error': 'Invalid JSON in request body'
+            }, status=400)
         
-        Returns SQL and execution plan information without running the query.
-        """
-        try:
-            # Parse JSON body
-            try:
-                query_json = json.loads(request.body)
-            except json.JSONDecodeError as e:
-                return JsonResponse({
-                    'success': False,
-                    'error': f'Invalid JSON: {str(e)}'
-                }, status=400)
-            
-            # Get query plan
-            plan_result = QueryExecutor.get_query_plan(query_json)
-            
-            return JsonResponse(plan_result)
-            
-        except Exception as e:
-            logger.error(f"Query explain error: {str(e)}")
+        if not sql:
             return JsonResponse({
-                'success': False,
-                'error': f'Explain error: {str(e)}'
-            }, status=500)
-
-
-class QuerySchemaAPIView(View):
-    """API view for getting schema information."""
-    
-    def get(self, request):
-        """
-        Get schema information for the query builder.
+                'valid': False,
+                'error': 'No SQL query provided'
+            }, status=400)
         
-        Query parameters:
-        - model: Get schema for a specific model
-        - field: Get field suggestions for a model
-        """
+        # Validate the query
         try:
-            schema = QuerySchema()
-            
-            # Check if requesting specific model info
-            model_name = request.GET.get('model')
-            if model_name:
-                models_info = schema.get_models_info()
-                if model_name in models_info:
-                    return JsonResponse({
-                        'model': model_name,
-                        'info': models_info[model_name],
-                        'operations': schema.get_operations_info(),
-                        'aggregations': schema.get_aggregations_info()
-                    })
-                else:
-                    return JsonResponse({
-                        'error': f'Model "{model_name}" not found',
-                        'available_models': list(models_info.keys())
-                    }, status=404)
-            
-            # Check if requesting field suggestions
-            field_partial = request.GET.get('field')
-            if field_partial and model_name:
-                suggestions = schema.get_field_suggestions(model_name, field_partial)
-                return JsonResponse({
-                    'model': model_name,
-                    'field_partial': field_partial,
-                    'suggestions': suggestions
-                })
-            
-            # Return full schema
-            full_schema = schema.get_full_schema()
-            return JsonResponse(full_schema)
-            
-        except Exception as e:
-            logger.error(f"Schema API error: {str(e)}")
+            safe_sql = SQLSecurityValidator.validate_and_secure_sql(sql)
             return JsonResponse({
-                'error': f'Schema error: {str(e)}'
-            }, status=500)
-
-
-class QueryExamplesAPIView(View):
-    """API view for getting example queries."""
-    
-    def get(self, request):
-        """Get example queries for common use cases."""
-        try:
-            schema = QuerySchema()
-            examples = schema.get_example_queries()
-            
-            # Filter by model if requested
-            model_filter = request.GET.get('model')
-            if model_filter:
-                examples = [
-                    example for example in examples 
-                    if example['query'].get('model') == model_filter
-                ]
-            
-            return JsonResponse({
-                'examples': examples,
-                'total_count': len(examples),
-                'model_filter': model_filter
+                'valid': True,
+                'message': 'SQL query is valid and safe',
+                'secured_sql': safe_sql
             })
-            
-        except Exception as e:
-            logger.error(f"Examples API error: {str(e)}")
+        except ValueError as e:
             return JsonResponse({
-                'error': f'Examples error: {str(e)}'
-            }, status=500)
+                'valid': False,
+                'error': str(e)
+            }, status=400)
+        
+    except Exception as e:
+        logger.error(f"SQL validation AJAX error: {str(e)}")
+        return JsonResponse({
+            'valid': False,
+            'error': f'Validation error: {str(e)}'
+        }, status=500)
 
 
-# Function-based view alternatives for simpler routing
-@csrf_exempt
-@require_http_methods(["POST"])
-def query_execute(request):
-    """Function-based view for executing queries."""
-    view = QueryAPIView()
-    return view.post(request)
+def get_example_queries():
+    """Get example SQL queries for the interface."""
+    return [
+        {
+            'name': 'Simple dataset search',
+            'description': 'Find datasets containing "mouse" in the name',
+            'sql': "SELECT id, name, description FROM dandisets_dandiset WHERE name ILIKE '%mouse%' ORDER BY name LIMIT 20"
+        },
+        {
+            'name': 'Count datasets by species',
+            'description': 'Count how many datasets exist for each species',
+            'sql': """SELECT s.name, COUNT(DISTINCT d.id) as dataset_count 
+FROM dandisets_dandiset d 
+JOIN dandisets_assetdandiset ad ON d.id = ad.dandiset_id 
+JOIN dandisets_asset a ON ad.asset_id = a.id 
+JOIN dandisets_assetwasattributedto awo ON a.id = awo.asset_id 
+JOIN dandisets_participant p ON awo.participant_id = p.id 
+JOIN dandisets_speciestype s ON p.species_id = s.id 
+GROUP BY s.name 
+ORDER BY dataset_count DESC"""
+        },
+        {
+            'name': 'Find datasets with many files',
+            'description': 'Find datasets with the most files',
+            'sql': """SELECT d.id, d.name, COUNT(a.id) as file_count
+FROM dandisets_dandiset d
+JOIN dandisets_assetdandiset ad ON d.id = ad.dandiset_id
+JOIN dandisets_asset a ON ad.asset_id = a.id
+GROUP BY d.id, d.name
+ORDER BY file_count DESC
+LIMIT 20"""
+        },
+        {
+            'name': 'Dataset summary statistics',
+            'description': 'Get basic statistics for all datasets',
+            'sql': """SELECT 
+    d.id,
+    d.name,
+    d.date_created,
+    d.date_published,
+    COUNT(a.id) as total_files
+FROM dandisets_dandiset d
+LEFT JOIN dandisets_assetdandiset ad ON d.id = ad.dandiset_id
+LEFT JOIN dandisets_asset a ON ad.asset_id = a.id
+GROUP BY d.id, d.name, d.date_created, d.date_published
+ORDER BY d.date_published DESC NULLS LAST
+LIMIT 20"""
+        },
+        {
+            'name': 'Recent datasets with contributors',
+            'description': 'Find recently published datasets with contributor information',
+            'sql': """SELECT 
+    d.name as dataset_name,
+    d.date_published,
+    c.name as contributor_name,
+    c.email
+FROM dandisets_dandiset d
+JOIN dandisets_dandisetcontributor dc ON d.id = dc.dandiset_id
+JOIN dandisets_contributor c ON dc.contributor_id = c.id
+WHERE d.date_published IS NOT NULL
+ORDER BY d.date_published DESC
+LIMIT 20"""
+        }
+    ]
 
 
-@csrf_exempt
-@require_http_methods(["POST"])
-def query_validate(request):
-    """Function-based view for validating queries."""
-    view = QueryValidateAPIView()
-    return view.post(request)
-
-
-@csrf_exempt
-@require_http_methods(["POST"])
-def query_explain(request):
-    """Function-based view for explaining queries."""
-    view = QueryExplainAPIView()
-    return view.post(request)
-
-
-@require_http_methods(["GET"])
-def query_schema(request):
-    """Function-based view for getting schema information."""
-    view = QuerySchemaAPIView()
-    return view.get(request)
-
-
-@require_http_methods(["GET"])
-def query_examples(request):
-    """Function-based view for getting example queries."""
-    view = QueryExamplesAPIView()
-    return view.get(request)
+def get_allowed_tables():
+    """Get list of allowed tables for documentation."""
+    from django.db import connection
+    
+    allowed_tables = []
+    try:
+        with connection.cursor() as cursor:
+            for prefix in SQLSecurityValidator.ALLOWED_TABLE_PREFIXES:
+                cursor.execute("""
+                    SELECT table_name 
+                    FROM information_schema.tables 
+                    WHERE table_name LIKE %s
+                    AND table_schema = 'public'
+                    ORDER BY table_name
+                """, [f"{prefix}%"])
+                
+                for row in cursor.fetchall():
+                    allowed_tables.append(row[0])
+    except Exception as e:
+        logger.error(f"Error getting allowed tables: {e}")
+    
+    return sorted(allowed_tables)

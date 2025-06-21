@@ -1,0 +1,537 @@
+{% extends 'dandisets/base.html' %}
+{% load dandi_filters %}
+
+{% block title %}SQL Query Interface - DANDI{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <h1 class="mb-4">
+            <i class="fas fa-code"></i> Custom SQL Query Interface
+        </h1>
+        
+        <!-- Security Notice -->
+        <div class="alert alert-info mb-4" role="alert">
+            <i class="fas fa-shield-alt"></i>
+            <strong>Security Notice:</strong> This interface operates in read-only mode. Only SELECT statements are allowed, and queries are automatically validated for security.
+        </div>
+        
+        <!-- Messages -->
+        {% if messages %}
+            {% for message in messages %}
+                <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            {% endfor %}
+        {% endif %}
+        
+        <!-- Query Form -->
+        <div class="filter-section">
+            <form method="post" id="sqlForm">
+                {% csrf_token %}
+                <div class="row">
+                    <div class="col-md-12">
+                        <label for="sql" class="form-label">
+                            <i class="fas fa-database"></i> SQL Query
+                        </label>
+                        <textarea class="form-control" 
+                                  id="sql" 
+                                  name="sql" 
+                                  rows="8" 
+                                  placeholder="Enter your SQL query here... (SELECT statements only)"
+                                  required>{{ query }}</textarea>
+                        <div class="form-text">
+                            Maximum query length: 10,000 characters. Results limited to 1,000 rows.
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row mt-3">
+                    <div class="col-md-12">
+                        <button type="submit" class="btn btn-primary me-2" id="executeBtn">
+                            <i class="fas fa-play"></i> Execute Query
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary me-2" id="validateBtn">
+                            <i class="fas fa-check-circle"></i> Validate Only
+                        </button>
+                        <button type="button" class="btn btn-outline-info me-2" id="clearBtn">
+                            <i class="fas fa-eraser"></i> Clear
+                        </button>
+                        <button type="button" class="btn btn-outline-dark" data-bs-toggle="collapse" data-bs-target="#helpSection">
+                            <i class="fas fa-question-circle"></i> Help
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+        
+        <!-- Validation Results (AJAX) -->
+        <div id="validationResults" class="mb-4" style="display: none;">
+            <div class="alert" role="alert" id="validationAlert">
+                <span id="validationMessage"></span>
+            </div>
+        </div>
+        
+        <!-- Help Section -->
+        <div class="collapse mb-4" id="helpSection">
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="fas fa-info-circle"></i> Query Help & Documentation</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6>Available Tables</h6>
+                            <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Table Name</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for table in allowed_tables %}
+                                        <tr>
+                                            <td><code>{{ table }}</code></td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <h6>Security Restrictions</h6>
+                            <ul class="list-unstyled">
+                                <li><i class="fas fa-check text-success"></i> Only SELECT statements allowed</li>
+                                <li><i class="fas fa-check text-success"></i> Access limited to DANDI tables only</li>
+                                <li><i class="fas fa-check text-success"></i> Read-only database connection</li>
+                                <li><i class="fas fa-check text-success"></i> Query complexity limits enforced</li>
+                                <li><i class="fas fa-check text-success"></i> Results limited to 1,000 rows</li>
+                                <li><i class="fas fa-times text-danger"></i> No INSERT/UPDATE/DELETE</li>
+                                <li><i class="fas fa-times text-danger"></i> No system functions</li>
+                                <li><i class="fas fa-times text-danger"></i> No file operations</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Example Queries -->
+        <div class="mb-4">
+            <h3>Example Queries</h3>
+            <div class="accordion" id="exampleQueriesAccordion">
+                {% for example in example_queries %}
+                <div class="accordion-item">
+                    <h2 class="accordion-header" id="exampleHeading{{ forloop.counter }}">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#exampleCollapse{{ forloop.counter }}" aria-expanded="false" aria-controls="exampleCollapse{{ forloop.counter }}">
+                            <i class="fas fa-code text-primary me-2"></i>
+                            <strong>{{ example.name }}</strong>
+                            <small class="text-muted ms-2">- {{ example.description }}</small>
+                        </button>
+                    </h2>
+                    <div id="exampleCollapse{{ forloop.counter }}" class="accordion-collapse collapse" aria-labelledby="exampleHeading{{ forloop.counter }}" data-bs-parent="#exampleQueriesAccordion">
+                        <div class="accordion-body">
+                            <p class="text-muted mb-3">{{ example.description }}</p>
+                            <pre class="bg-light p-3 rounded" style="font-size: 0.9em; overflow-x: auto;"><code>{{ example.sql }}</code></pre>
+                            <button type="button" class="btn btn-sm btn-outline-primary load-example" data-sql="{{ example.sql }}">
+                                <i class="fas fa-copy"></i> Load This Example
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        
+        <!-- Hidden data for JavaScript -->
+        {% if results %}
+        <script id="results-data" type="application/json">{{ results|escapejs }}</script>
+        <script id="columns-data" type="application/json">{{ metadata.columns|escapejs }}</script>
+        {% if all_results %}
+        <script id="all-results-data" type="application/json">{{ all_results|escapejs }}</script>
+        {% endif %}
+        {% endif %}
+
+        <!-- Query Results -->
+        {% if results is not None or error %}
+        <div class="results-section">
+            <h3>Query Results</h3>
+            
+            {% if error %}
+                <div class="alert alert-danger" role="alert">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <strong>Error:</strong> {{ error }}
+                </div>
+            {% elif results %}
+                <!-- Results Summary -->
+                <div class="stats-card mb-3">
+                    <div class="row text-center">
+                        <div class="col">
+                            {% if pagination %}
+                            <div class="h4 mb-0">{{ pagination.total_results }}</div>
+                            <small>Total Row{{ pagination.total_results|pluralize }}</small>
+                            {% else %}
+                            <div class="h4 mb-0">{{ metadata.row_count }}</div>
+                            <small>Row{{ metadata.row_count|pluralize }}</small>
+                            {% endif %}
+                        </div>
+                        <div class="col border-start">
+                            <div class="h4 mb-0">{{ metadata.column_count }}</div>
+                            <small>Column{{ metadata.column_count|pluralize }}</small>
+                        </div>
+                        {% if pagination %}
+                        <div class="col border-start">
+                            <div class="h4 mb-0">{{ pagination.current_page }} / {{ pagination.total_pages }}</div>
+                            <small>Page</small>
+                        </div>
+                        <div class="col border-start">
+                            <div class="h4 mb-0">{{ pagination.start_result }} - {{ pagination.end_result }}</div>
+                            <small>Showing</small>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <!-- Results Table -->
+                {% if results %}
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                {% for column in metadata.columns %}
+                                <th>{{ column }}</th>
+                                {% endfor %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in results %}
+                            <tr>
+                                {% for column in metadata.columns %}
+                                <td>
+                                    {% with value=row|lookup:column %}
+                                        {% if value is None %}
+                                            <span class="text-muted">NULL</span>
+                                        {% elif value == True %}
+                                            <span class="badge bg-success">True</span>
+                                        {% elif value == False %}
+                                            <span class="badge bg-danger">False</span>
+                                        {% else %}
+                                            {{ value }}
+                                        {% endif %}
+                                    {% endwith %}
+                                </td>
+                                {% endfor %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Pagination Controls -->
+                {% if pagination and pagination.total_pages > 1 %}
+                <div class="d-flex justify-content-between align-items-center mt-3 mb-3">
+                    <div class="text-muted">
+                        Showing {{ pagination.start_result }} to {{ pagination.end_result }} of {{ pagination.total_results }} results
+                    </div>
+                    <nav aria-label="Results pagination">
+                        <ul class="pagination mb-0">
+                            {% if pagination.has_previous %}
+                            <li class="page-item">
+                                <button type="button" class="page-link pagination-btn" data-page="{{ pagination.previous_page }}">
+                                    <i class="fas fa-chevron-left"></i> Previous
+                                </button>
+                            </li>
+                            {% else %}
+                            <li class="page-item disabled">
+                                <span class="page-link"><i class="fas fa-chevron-left"></i> Previous</span>
+                            </li>
+                            {% endif %}
+                            
+                            {% for page_num in pagination.total_pages|paginate_range:pagination.current_page %}
+                                {% if page_num == pagination.current_page %}
+                                <li class="page-item active">
+                                    <span class="page-link">{{ page_num }}</span>
+                                </li>
+                                {% elif page_num == "..." %}
+                                <li class="page-item disabled">
+                                    <span class="page-link">…</span>
+                                </li>
+                                {% else %}
+                                <li class="page-item">
+                                    <button type="button" class="page-link pagination-btn" data-page="{{ page_num }}">{{ page_num }}</button>
+                                </li>
+                                {% endif %}
+                            {% endfor %}
+                            
+                            {% if pagination.has_next %}
+                            <li class="page-item">
+                                <button type="button" class="page-link pagination-btn" data-page="{{ pagination.next_page }}">
+                                    Next <i class="fas fa-chevron-right"></i>
+                                </button>
+                            </li>
+                            {% else %}
+                            <li class="page-item disabled">
+                                <span class="page-link">Next <i class="fas fa-chevron-right"></i></span>
+                            </li>
+                            {% endif %}
+                        </ul>
+                    </nav>
+                </div>
+                {% endif %}
+                
+                <!-- Export Options -->
+                <div class="mt-3">
+                    <button type="button" class="btn btn-outline-secondary" id="downloadCsv">
+                        <i class="fas fa-download"></i> Download as CSV
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" id="downloadJson">
+                        <i class="fas fa-download"></i> Download as JSON
+                    </button>
+                </div>
+                {% else %}
+                <div class="alert alert-info" role="alert">
+                    <i class="fas fa-info-circle"></i>
+                    Query executed successfully but returned no results.
+                </div>
+                {% endif %}
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<style>
+.results-section {
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 2px solid #dee2e6;
+}
+
+.load-example {
+    cursor: pointer;
+}
+
+pre code {
+    white-space: pre;
+    word-wrap: break-word;
+}
+
+.table th {
+    font-weight: 600;
+    background-color: #212529 !important;
+    color: white !important;
+    border-color: #454d55 !important;
+}
+
+.table-dark th {
+    background-color: #212529 !important;
+    color: white !important;
+    border-color: #454d55 !important;
+}
+
+.table td {
+    vertical-align: middle;
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.table td:hover {
+    overflow: visible;
+    white-space: normal;
+    word-wrap: break-word;
+}
+
+#sql {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.9em;
+}
+
+.validation-success {
+    background-color: #d1edff;
+    border-color: #bee5eb;
+    color: #0c5460;
+}
+
+.validation-error {
+    background-color: #f8d7da;
+    border-color: #f5c6cb;
+    color: #721c24;
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const sqlTextarea = document.getElementById('sql');
+    const executeBtn = document.getElementById('executeBtn');
+    const validateBtn = document.getElementById('validateBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const validationResults = document.getElementById('validationResults');
+    const validationAlert = document.getElementById('validationAlert');
+    const validationMessage = document.getElementById('validationMessage');
+    
+    // Load example queries
+    document.querySelectorAll('.load-example').forEach(button => {
+        button.addEventListener('click', function() {
+            const sql = this.getAttribute('data-sql');
+            sqlTextarea.value = sql;
+            sqlTextarea.focus();
+        });
+    });
+    
+    // Clear button
+    clearBtn.addEventListener('click', function() {
+        sqlTextarea.value = '';
+        validationResults.style.display = 'none';
+        sqlTextarea.focus();
+    });
+    
+    // Validate button (AJAX)
+    validateBtn.addEventListener('click', function() {
+        const sql = sqlTextarea.value.trim();
+        
+        if (!sql) {
+            showValidationResult(false, 'Please enter a SQL query to validate.');
+            return;
+        }
+        
+        // Show loading state
+        validateBtn.disabled = true;
+        validateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Validating...';
+        
+        // Make AJAX request
+        fetch('/api/sql/validate-ajax/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ sql: sql })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.valid) {
+                showValidationResult(true, data.message);
+                if (data.secured_sql && data.secured_sql !== sql) {
+                    showValidationResult(true, data.message + '<br><small><strong>Note:</strong> Query will be executed with automatic security enhancements.</small>');
+                }
+            } else {
+                showValidationResult(false, data.error);
+            }
+        })
+        .catch(error => {
+            console.error('Validation error:', error);
+            showValidationResult(false, 'Network error during validation.');
+        })
+        .finally(() => {
+            // Reset button state
+            validateBtn.disabled = false;
+            validateBtn.innerHTML = '<i class="fas fa-check-circle"></i> Validate Only';
+        });
+    });
+    
+    function showValidationResult(isValid, message) {
+        validationAlert.className = isValid ? 'alert validation-success' : 'alert validation-error';
+        validationMessage.innerHTML = message;
+        validationResults.style.display = 'block';
+        
+        // Auto-hide after 5 seconds for success messages
+        if (isValid) {
+            setTimeout(() => {
+                validationResults.style.display = 'none';
+            }, 5000);
+        }
+    }
+    
+    // Pagination functionality
+    document.querySelectorAll('.pagination-btn').forEach(button => {
+        button.addEventListener('click', function() {
+            const page = this.getAttribute('data-page');
+            if (page) {
+                // Add hidden page input to form and submit
+                const pageInput = document.createElement('input');
+                pageInput.type = 'hidden';
+                pageInput.name = 'page';
+                pageInput.value = page;
+                document.getElementById('sqlForm').appendChild(pageInput);
+                document.getElementById('sqlForm').submit();
+            }
+        });
+    });
+    
+    // Download functions - only attach if elements exist
+    const downloadCsvBtn = document.getElementById('downloadCsv');
+    const downloadJsonBtn = document.getElementById('downloadJson');
+    
+    if (downloadCsvBtn && downloadJsonBtn) {
+        downloadCsvBtn.addEventListener('click', function() {
+            downloadResults('csv');
+        });
+        
+        downloadJsonBtn.addEventListener('click', function() {
+            downloadResults('json');
+        });
+        
+        function downloadResults(format) {
+            // Try to get all results first, fall back to current page results
+            let resultsDataEl = document.getElementById('all-results-data');
+            if (!resultsDataEl) {
+                resultsDataEl = document.getElementById('results-data');
+            }
+            const columnsDataEl = document.getElementById('columns-data');
+            
+            if (!resultsDataEl || !columnsDataEl) {
+                alert('No data available for download');
+                return;
+            }
+            
+            const resultsData = JSON.parse(resultsDataEl.textContent);
+            const columnsData = JSON.parse(columnsDataEl.textContent);
+            
+            let content, mimeType, filename;
+            
+            if (format === 'csv') {
+                // Generate CSV
+                const csvRows = [];
+                csvRows.push(columnsData.join(','));
+                
+                resultsData.forEach(row => {
+                    const values = columnsData.map(col => {
+                        const value = row[col];
+                        if (value === null || value === undefined) return '';
+                        if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
+                            return '"' + value.replace(/"/g, '""') + '"';
+                        }
+                        return value;
+                    });
+                    csvRows.push(values.join(','));
+                });
+                
+                content = csvRows.join('\n');
+                mimeType = 'text/csv';
+                filename = 'query_results.csv';
+            } else if (format === 'json') {
+                content = JSON.stringify(resultsData, null, 2);
+                mimeType = 'application/json';
+                filename = 'query_results.json';
+            }
+            
+            // Create download
+            const blob = new Blob([content], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+    }
+});
+</script>
+{% endblock %}
