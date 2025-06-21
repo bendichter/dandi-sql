@@ -433,11 +433,14 @@ Individual files/sessions within datasets.
 
 **Key Fields:**
 - `id` (integer) - Unique asset identifier
-- `path` (text) - File path within dataset
-- `size` (bigint) - File size in bytes
+- `dandi_asset_id` (text) - DANDI asset identifier
+- `content_size` (bigint) - File size in bytes
+- `encoding_format` (text) - File format/media type
 - `variable_measured` (jsonb) - Array of measured variables
-- `session_description` (text) - Session description
-- `session_start_time` (timestamp) - Session start time
+- `date_modified` (timestamp) - Asset modification date
+- `date_published` (timestamp) - Asset publication date
+
+**Note:** Asset paths are stored in the `dandisets_assetdandiset` relationship table since the same asset content can have different paths in different datasets.
 
 ### dandisets_participant
 Subject/participant information.
@@ -452,11 +455,14 @@ Subject/participant information.
 ## Relationship Tables
 
 ### dandisets_assetdandiset
-Links assets to datasets (many-to-many).
+Links assets to datasets (many-to-many) and stores the asset path within each dataset.
 
 **Fields:**
 - `asset_id` (integer) - Foreign key to asset
 - `dandiset_id` (integer) - Foreign key to dataset
+- `path` (text) - Path to the asset within this specific dataset
+- `date_added` (timestamp) - When asset was added to this dataset
+- `is_primary` (boolean) - Whether this is the primary dataset for this asset
 
 ### dandisets_assetwasattributedto
 Links assets to participants (many-to-many).
@@ -492,7 +498,11 @@ Use `get_schema` tool with a table name to get detailed column information.
                 },
                 {
                     "name": "Count datasets by species",
-                    "sql": "SELECT s.genus_species, COUNT(DISTINCT d.id) as dataset_count FROM dandisets_dandiset d JOIN dandisets_assetdandiset ad ON d.id = ad.dandiset_id JOIN dandisets_asset a ON ad.asset_id = a.id JOIN dandisets_assetwasattributedto awo ON a.id = awo.asset_id JOIN dandisets_participant p ON awo.participant_id = p.id JOIN dandisets_species s ON p.species_id = s.id GROUP BY s.genus_species ORDER BY dataset_count DESC"
+                    "sql": "SELECT s.name, COUNT(DISTINCT d.base_id) as dataset_count FROM dandisets_dandiset d JOIN dandisets_assetdandiset ad ON d.id = ad.dandiset_id JOIN dandisets_asset a ON ad.asset_id = a.id JOIN dandisets_assetwasattributedto awo ON a.id = awo.asset_id JOIN dandisets_participant p ON awo.participant_id = p.id JOIN dandisets_speciestype s ON p.species_id = s.id GROUP BY s.name ORDER BY dataset_count DESC"
+                },
+                {
+                    "name": "Browse asset paths by dataset",
+                    "sql": "SELECT d.base_id, d.name as dataset_name, ad.path, a.encoding_format, a.content_size FROM dandisets_dandiset d JOIN dandisets_assetdandiset ad ON d.id = ad.dandiset_id JOIN dandisets_asset a ON ad.asset_id = a.id WHERE d.base_id = 'DANDI:000003' ORDER BY ad.path LIMIT 20"
                 },
                 {
                     "name": "Find datasets with multiple subjects having multiple sessions",

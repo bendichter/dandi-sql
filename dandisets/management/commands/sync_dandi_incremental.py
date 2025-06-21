@@ -1496,7 +1496,6 @@ class Command(BaseCommand):
             dandi_asset_id=asset_id,
             defaults={
                 'identifier': asset_id,
-                'path': data.get('path', ''),
                 'content_size': data.get('contentSize', 0),
                 'encoding_format': data.get('encodingFormat', ''),
                 'schema_key': data.get('schemaKey', 'Asset'),
@@ -1518,13 +1517,19 @@ class Command(BaseCommand):
 
         if self.verbose:
             action = "Created" if created else "Updated"
-            self.stdout.write(f"{action} asset: {asset.path}")
+            # Get path from the data we're loading
+            path_from_data = data.get('path', 'unknown')
+            self.stdout.write(f"{action} asset: {path_from_data}")
 
-        # Create the asset-dandiset relationship
+        # Create the asset-dandiset relationship with path
+        asset_path = data.get('path', '')
         AssetDandiset.objects.get_or_create(
             asset=asset,
             dandiset=dandiset,
-            defaults={'is_primary': True}
+            defaults={
+                'path': asset_path,
+                'is_primary': True
+            }
         )
 
         # Load access requirements

@@ -32,3 +32,44 @@ def paginate_range(total_pages, current_page):
     else:
         # Show first page + ellipsis + current-1, current, current+1 + ellipsis + last page
         return [1, "...", current_page - 1, current_page, current_page + 1, "...", total_pages]
+
+
+@register.filter
+def get_dandiset_number(dandi_id):
+    """
+    Extract the dandiset number from a DANDI ID.
+    Example: "DANDI:000001/draft" -> "000001"
+    Usage: {{ dandiset.dandi_id|get_dandiset_number }}
+    """
+    if not dandi_id:
+        return None
+    
+    # Handle format: "DANDI:000001/draft" or "DANDI:000001/0.210812.1515"
+    if dandi_id.startswith('DANDI:'):
+        parts = dandi_id.split('/')
+        if len(parts) >= 1:
+            # Extract number part after "DANDI:"
+            number_part = parts[0][6:]  # Remove "DANDI:" prefix
+            return number_part
+    
+    return None
+
+
+@register.filter
+def get_dandiset_version(dandi_id):
+    """
+    Extract the version from a DANDI ID.
+    Example: "DANDI:000001/draft" -> "draft"
+    Example: "DANDI:000001/0.210812.1515" -> "0.210812.1515"
+    Usage: {{ dandiset.dandi_id|get_dandiset_version }}
+    """
+    if not dandi_id:
+        return None
+    
+    # Handle format: "DANDI:000001/draft" or "DANDI:000001/0.210812.1515"
+    if '/' in dandi_id:
+        parts = dandi_id.split('/')
+        if len(parts) >= 2:
+            return parts[1]
+    
+    return None

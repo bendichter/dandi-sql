@@ -354,10 +354,20 @@ class AssetDandisetInline(ReadOnlyTabularInline):
 
 @admin.register(Asset)
 class AssetAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
-    list_display = ['dandi_asset_id', 'path', 'get_dandisets', 'content_size', 'encoding_format', 'date_published']
+    list_display = ['dandi_asset_id', 'get_primary_path', 'get_dandisets', 'content_size', 'encoding_format', 'date_published']
     list_filter = ['encoding_format', 'date_published', 'created_by_sync', 'last_modified_by_sync']
-    search_fields = ['dandi_asset_id', 'path', 'identifier']
+    search_fields = ['dandi_asset_id', 'identifier', 'asset_dandisets__path']
     readonly_fields = ['created_at', 'updated_at', 'created_by_sync', 'last_modified_by_sync']
+    
+    @admin.display(description='Primary Path')
+    def get_primary_path(self, obj):
+        """Get the path from the primary dandiset relationship"""
+        primary_relationship = obj.asset_dandisets.filter(is_primary=True).first()
+        if primary_relationship:
+            return primary_relationship.path
+        # Fallback to any path if no primary is set
+        first_relationship = obj.asset_dandisets.first()
+        return first_relationship.path if first_relationship else 'No path'
     
     @admin.display(description='Dandisets')
     def get_dandisets(self, obj):
@@ -378,7 +388,7 @@ class AssetAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
             'fields': ('dandi_asset_id', 'identifier')
         }),
         ('File Information', {
-            'fields': ('path', 'content_size', 'encoding_format', 'digest', 'content_url')
+            'fields': ('content_size', 'encoding_format', 'digest', 'content_url')
         }),
         ('Schema Information', {
             'fields': ('schema_version', 'schema_key')

@@ -431,9 +431,6 @@ class Dandiset(models.Model):
         """Get the latest version of this dandiset"""
         return Dandiset.objects.filter(base_id=self.base_id, is_latest=True).first()
     
-    def get_next_version(self):
-        """Get the next version of this dandiset"""
-        return self.newer_versions.first()
     
     def save(self, *args, **kwargs):
         # Extract base_id from dandi_id if not set
@@ -564,7 +561,6 @@ class Asset(models.Model):
     schema_key = models.CharField(max_length=50, default="Asset")
     
     # File information
-    path = models.TextField(help_text="Path to the asset within the dandiset")
     content_size = models.BigIntegerField(help_text="Size of the asset in bytes")
     encoding_format = models.CharField(max_length=50, choices=ENCODING_FORMAT_CHOICES, 
                                      help_text="Media type, typically expressed using a MIME format")
@@ -595,16 +591,19 @@ class Asset(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
-        ordering = ['path']
+        ordering = ['dandi_asset_id']
     
     def __str__(self):
-        return f"{self.dandi_asset_id}: {self.path}"
+        return f"{self.dandi_asset_id}"
 
 
 class AssetDandiset(models.Model):
     """Many-to-many relationship between assets and dandisets"""
     asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name='asset_dandisets')
     dandiset = models.ForeignKey(Dandiset, on_delete=models.CASCADE, related_name='dandiset_assets')
+    
+    # Path is stored here since the same asset can have different paths in different dandisets
+    path = models.TextField(help_text="Path to the asset within this specific dandiset")
     
     # Optional metadata about the asset's relationship to this specific dandiset
     date_added = models.DateTimeField(auto_now_add=True, help_text="When this asset was added to this dandiset")
@@ -616,7 +615,7 @@ class AssetDandiset(models.Model):
         verbose_name_plural = "Asset-Dandiset Associations"
     
     def __str__(self):
-        return f"{self.asset.dandi_asset_id} in {self.dandiset.dandi_id}"
+        return f"{self.asset.dandi_asset_id} ({self.path}) in {self.dandiset.dandi_id}"
 
 
 class AssetAccess(models.Model):
@@ -718,13 +717,14 @@ class LindiMetadata(models.Model):
         ordering = ['-processed_at']
     
     def __str__(self):
-        return f"LINDI metadata for {self.asset.path}"
+        return f"LINDI metadata for {self.asset.dandi_asset_id}"
     
     @property
     def dandiset_id(self):
         """Get the dandiset ID from the associated asset"""
-        if self.asset.dandisets.exists():
-            return self.asset.dandisets.first().base_id
+        first_dandiset = self.asset.dandisets.first()
+        if first_dandiset:
+            return first_dandiset.base_id
         return None
     
     @property

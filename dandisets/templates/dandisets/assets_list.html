@@ -5,7 +5,15 @@
         <div class="col-md-8">
             <div class="asset-path">
                 <i class="fas fa-file-code text-muted me-1"></i>
-                <code class="text-break">{{ asset.path }}</code>
+                <code class="text-break">
+                    {% with asset_dandiset=asset.asset_dandisets.first %}
+                        {% if asset_dandiset %}
+                            {{ asset_dandiset.path }}
+                        {% else %}
+                            No path available
+                        {% endif %}
+                    {% endwith %}
+                </code>
             </div>
             
             <!-- Asset API Link -->

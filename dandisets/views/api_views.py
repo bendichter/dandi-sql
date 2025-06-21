@@ -293,7 +293,7 @@ def perform_dandiset_search(request_params) -> Dict[str, Any]:
     has_asset_filters = False
     
     if asset_path_search:
-        asset_query &= Q(path__icontains=asset_path_search)
+        asset_query &= Q(asset_dandisets__path__icontains=asset_path_search)
         filters['asset_path'] = asset_path_search
         has_asset_filters = True
     
@@ -360,7 +360,7 @@ def perform_dandiset_search(request_params) -> Dict[str, Any]:
         # Check if we have other asset filters besides file format
         non_file_format_filters = []
         if asset_path_search:
-            non_file_format_filters.append(Q(path__icontains=asset_path_search))
+            non_file_format_filters.append(Q(asset_dandisets__path__icontains=asset_path_search))
         if asset_min_size:
             try:
                 min_size_bytes = float(asset_min_size) * 1024 * 1024
@@ -487,7 +487,7 @@ def api_dandiset_assets(request: HttpRequest, dandiset_id: str) -> JsonResponse:
         # Asset path search
         asset_path_search = request.GET.get('asset_path', '').strip()
         if asset_path_search:
-            asset_query &= Q(path__icontains=asset_path_search)
+            asset_query &= Q(asset_dandisets__path__icontains=asset_path_search)
             has_asset_filters = True
         
         # File format filter
@@ -561,9 +561,9 @@ def api_dandiset_assets(request: HttpRequest, dandiset_id: str) -> JsonResponse:
         
         # Get filtered assets for this dandiset
         if has_asset_filters:
-            assets = all_assets.filter(asset_query).order_by('path')
+            assets = all_assets.filter(asset_query).order_by('asset_dandisets__path')
         else:
-            assets = all_assets.order_by('path')
+            assets = all_assets.order_by('asset_dandisets__path')
         
         # Pagination
         assets_per_page = 10
@@ -645,7 +645,7 @@ def api_asset_search(request: HttpRequest) -> JsonResponse:
         # Asset path search
         asset_path_search = request.GET.get('asset_path', '').strip()
         if asset_path_search:
-            assets = assets.filter(path__icontains=asset_path_search)
+            assets = assets.filter(asset_dandisets__path__icontains=asset_path_search)
             filters['asset_path'] = asset_path_search
         
         # File format filter
@@ -734,13 +734,13 @@ def api_asset_search(request: HttpRequest) -> JsonResponse:
                 pass
         
         # Ordering
-        order_by = request.GET.get('order_by', 'path')
-        valid_order_fields = ['path', 'content_size', 'date_created', 'date_modified', 'encoding_format']
+        order_by = request.GET.get('order_by', 'asset_dandisets__path')
+        valid_order_fields = ['asset_dandisets__path', 'content_size', 'date_created', 'date_modified', 'encoding_format']
         
         if order_by.lstrip('-') in valid_order_fields:
             assets = assets.order_by(order_by)
         else:
-            assets = assets.order_by('path')  # Default ordering
+            assets = assets.order_by('asset_dandisets__path')  # Default ordering
         
         # Pagination
         per_page = min(int(request.GET.get('per_page', 20)), 100)  # Max 100 per page
@@ -756,9 +756,15 @@ def api_asset_search(request: HttpRequest) -> JsonResponse:
         for asset in page_obj:
             if response_format == 'detailed':
                 # Detailed format with more fields
+                # Get the path from the first AssetDandiset relationship
+                asset_path = None
+                first_asset_dandiset = asset.asset_dandisets.first()
+                if first_asset_dandiset:
+                    asset_path = first_asset_dandiset.path
+                
                 asset_data = {
                     'id': asset.id,
-                    'path': asset.path,
+                    'path': asset_path,
                     'encoding_format': asset.encoding_format,
                     'content_size': asset.content_size,
                     'content_size_mb': round(asset.content_size / (1024 * 1024), 2) if asset.content_size else None,
@@ -781,9 +787,15 @@ def api_asset_search(request: HttpRequest) -> JsonResponse:
                 
             else:
                 # Summary format with basic fields
+                # Get the path from the first AssetDandiset relationship
+                asset_path = None
+                first_asset_dandiset = asset.asset_dandisets.first()
+                if first_asset_dandiset:
+                    asset_path = first_asset_dandiset.path
+                
                 asset_data = {
                     'id': asset.id,
-                    'path': asset.path,
+                    'path': asset_path,
                     'encoding_format': asset.encoding_format,
                     'content_size_mb': round(asset.content_size / (1024 * 1024), 2) if asset.content_size else None,
                     'date_created': asset.created_at.isoformat() if asset.created_at else None,
@@ -939,18 +951,24 @@ def api_search(request):
             if include_assets:
                 if has_asset_filters:
                     # Get assets that match the asset filters for this dandiset
-                    matching_assets = dandiset.assets.filter(search_results['asset_query']).order_by('path')[:assets_per_dandiset]
+                    matching_assets = dandiset.assets.filter(search_results['asset_query']).order_by('asset_dandisets__path')[:assets_per_dandiset]
                     total_matching_assets = dandiset.assets.filter(search_results['asset_query']).count()
                 else:
                     # Get all assets for this dandiset (limited number)
-                    matching_assets = dandiset.assets.all().order_by('path')[:assets_per_dandiset]
+                    matching_assets = dandiset.assets.all().order_by('asset_dandisets__path')[:assets_per_dandiset]
                     total_matching_assets = dandiset.assets.count()
                 
                 assets_data = []
                 for asset in matching_assets:
+                    # Get the path from the AssetDandiset relationship for this dandiset
+                    asset_path = None
+                    asset_dandiset = asset.asset_dandisets.filter(dandiset=dandiset).first()
+                    if asset_dandiset:
+                        asset_path = asset_dandiset.path
+                    
                     asset_info = {
                         'id': asset.id,
-                        'path': asset.path,
+                        'path': asset_path,
                         'encoding_format': asset.encoding_format,
                         'content_size': asset.content_size,
                         'content_size_mb': round(asset.content_size / (1024 * 1024), 2) if asset.content_size else None,
@@ -980,7 +998,7 @@ def api_search(request):
         asset_results = None
         if include_asset_pagination and has_asset_filters:
             # Get all assets that match the filters across all dandisets
-            all_matching_assets = Asset.objects.filter(search_results['asset_query']).order_by('path')
+            all_matching_assets = Asset.objects.filter(search_results['asset_query']).order_by('asset_dandisets__path')
             
             # Paginate the assets
             assets_paginator = Paginator(all_matching_assets, assets_per_page)
@@ -989,9 +1007,15 @@ def api_search(request):
             # Serialize assets
             assets_data = []
             for asset in assets_page_obj:
+                # Get the path from the first AssetDandiset relationship
+                asset_path = None
+                first_asset_dandiset = asset.asset_dandisets.first()
+                if first_asset_dandiset:
+                    asset_path = first_asset_dandiset.path
+                
                 asset_info = {
                     'id': asset.id,
-                    'path': asset.path,
+                    'path': asset_path,
                     'encoding_format': asset.encoding_format,
                     'content_size_mb': round(asset.content_size / (1024 * 1024), 2) if asset.content_size else None,
                     'date_created': asset.created_at.isoformat() if asset.created_at else None,
