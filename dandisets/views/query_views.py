@@ -190,12 +190,12 @@ def get_example_queries():
         {
             'name': 'Simple dataset search',
             'description': 'Find datasets containing "mouse" in the name',
-            'sql': "SELECT id, name, description FROM dandisets_dandiset WHERE name ILIKE '%mouse%' ORDER BY name LIMIT 20"
+            'sql': "SELECT base_id, name, description FROM dandisets_dandiset WHERE name ILIKE '%mouse%' ORDER BY name LIMIT 20"
         },
         {
             'name': 'Count datasets by species',
             'description': 'Count how many datasets exist for each species',
-            'sql': """SELECT s.name, COUNT(DISTINCT d.id) as dataset_count 
+            'sql': """SELECT s.name, COUNT(DISTINCT d.base_id) as dataset_count 
 FROM dandisets_dandiset d 
 JOIN dandisets_assetdandiset ad ON d.id = ad.dandiset_id 
 JOIN dandisets_asset a ON ad.asset_id = a.id 
@@ -208,11 +208,11 @@ ORDER BY dataset_count DESC"""
         {
             'name': 'Find datasets with many files',
             'description': 'Find datasets with the most files',
-            'sql': """SELECT d.id, d.name, COUNT(a.id) as file_count
+            'sql': """SELECT d.base_id, d.name, COUNT(a.id) as file_count
 FROM dandisets_dandiset d
 JOIN dandisets_assetdandiset ad ON d.id = ad.dandiset_id
 JOIN dandisets_asset a ON ad.asset_id = a.id
-GROUP BY d.id, d.name
+GROUP BY d.base_id, d.name
 ORDER BY file_count DESC
 LIMIT 20"""
         },
@@ -220,7 +220,7 @@ LIMIT 20"""
             'name': 'Dataset summary statistics',
             'description': 'Get basic statistics for all datasets',
             'sql': """SELECT 
-    d.id,
+    d.base_id,
     d.name,
     d.date_created,
     d.date_published,
@@ -228,7 +228,7 @@ LIMIT 20"""
 FROM dandisets_dandiset d
 LEFT JOIN dandisets_assetdandiset ad ON d.id = ad.dandiset_id
 LEFT JOIN dandisets_asset a ON ad.asset_id = a.id
-GROUP BY d.id, d.name, d.date_created, d.date_published
+GROUP BY d.base_id, d.name, d.date_created, d.date_published
 ORDER BY d.date_published DESC NULLS LAST
 LIMIT 20"""
         },
