@@ -289,7 +289,7 @@ def get_table_schema_ajax(request):
     """
     AJAX endpoint for getting table schema information.
     
-    Returns JSON response with table schema details.
+    Returns JSON response with table schema details including Django model help_text.
     """
     try:
         # Parse request body
@@ -315,12 +315,82 @@ def get_table_schema_ajax(request):
                 'error': f'Access to table "{table_name}" is not allowed'
             }, status=403)
         
-        # Get table schema
+        # Get Django model for this table to extract help_text
+        from django.apps import apps
+        
+        model = None
+        model_help_text = {}
+        table_description = None
+        
+        try:
+            # Map table names to Django model names
+            table_to_model_map = {
+                'dandisets_dandiset': 'Dandiset',
+                'dandisets_asset': 'Asset',
+                'dandisets_participant': 'Participant',
+                'dandisets_contributor': 'Contributor',
+                'dandisets_affiliation': 'Affiliation',
+                'dandisets_contactpoint': 'ContactPoint',
+                'dandisets_software': 'Software',
+                'dandisets_equipment': 'Equipment',
+                'dandisets_activity': 'Activity',
+                'dandisets_ethicsapproval': 'EthicsApproval',
+                'dandisets_accessrequirements': 'AccessRequirements',
+                'dandisets_resource': 'Resource',
+                'dandisets_assetssummary': 'AssetsSummary',
+                'dandisets_speciestype': 'SpeciesType',
+                'dandisets_approachtype': 'ApproachType',
+                'dandisets_measurementtechniquetype': 'MeasurementTechniqueType',
+                'dandisets_standardstype': 'StandardsType',
+                'dandisets_assaytype': 'AssayType',
+                'dandisets_sampletype': 'SampleType',
+                'dandisets_anatomy': 'Anatomy',
+                'dandisets_straintype': 'StrainType',
+                'dandisets_sextype': 'SexType',
+                'dandisets_disorder': 'Disorder',
+                'dandisets_generictype': 'GenericType',
+                'dandisets_synctracker': 'SyncTracker',
+                'dandisets_lindimetadata': 'LindiMetadata',
+                'dandisets_assetdandiset': 'AssetDandiset',
+                'dandisets_dandisetcontributor': 'DandisetContributor',
+                'dandisets_contributorafffiliation': 'ContributorAffiliation',
+                'dandisets_assetssummaryspecies': 'AssetsSummarySpecies',
+                'dandisets_assetssummaryapproach': 'AssetsSummaryApproach',
+                'dandisets_assetssummarydatastandard': 'AssetsSummaryDataStandard',
+                'dandisets_assetssummarymeasurementtechnique': 'AssetsSummaryMeasurementTechnique',
+                'dandisets_dandisetaccessrequirements': 'DandisetAccessRequirements',
+                'dandisets_dandisetrelatedresource': 'DandisetRelatedResource',
+                'dandisets_dandisetethicsapproval': 'DandisetEthicsApproval',
+                'dandisets_dandisetwasgeneratedby': 'DandisetWasGeneratedBy',
+            }
+            
+            model_name = table_to_model_map.get(table_name)
+            if model_name:
+                model = apps.get_model('dandisets', model_name)
+                
+                # Get table description from model meta
+                table_description = getattr(model._meta, 'db_table_comment', None)
+                
+                # Extract help_text for each field - only for actual model fields, not relations
+                for field in model._meta.get_fields():
+                    # Only process fields that have help_text (exclude reverse relations)
+                    if hasattr(field, 'help_text') and hasattr(field, 'name') and field.help_text:
+                        # Get the actual database column name
+                        column_name = getattr(field, 'column', field.name)
+                        if column_name:
+                            model_help_text[column_name] = field.help_text
+                        # Also try the field name itself in case column name differs
+                        model_help_text[field.name] = field.help_text
+                        
+        except Exception as model_error:
+            logger.warning(f"Could not load Django model for table {table_name}: {model_error}")
+        
+        # Get table schema from database
         from django.db import connection
         
         try:
             with connection.cursor() as cursor:
-                # Get columns for the table
+                # Get basic column information
                 cursor.execute("""
                     SELECT 
                         column_name, 
@@ -338,11 +408,13 @@ def get_table_schema_ajax(request):
                 
                 columns = []
                 for row in cursor.fetchall():
+                    column_name = row[0]
                     column_info = {
-                        'name': row[0],
+                        'name': column_name,
                         'type': row[1],
                         'nullable': row[2] == 'YES',
                         'default': row[3],
+                        'help_text': model_help_text.get(column_name, None),  # Use Django model help_text
                     }
                     
                     # Add length/precision info for relevant types
@@ -355,25 +427,13 @@ def get_table_schema_ajax(request):
                     
                     columns.append(column_info)
                 
-                # Get table comment if available
-                cursor.execute("""
-                    SELECT obj_description(oid) 
-                    FROM pg_class 
-                    WHERE relname = %s
-                """, [table_name])
-                
-                table_comment = None
-                comment_row = cursor.fetchone()
-                if comment_row and comment_row[0]:
-                    table_comment = comment_row[0]
-                
                 result = {
                     'success': True,
                     'table_name': table_name,
                     'display_name': table_name.replace('dandisets_', '') if table_name.startswith('dandisets_') else table_name,
                     'columns': columns,
                     'column_count': len(columns),
-                    'description': table_comment
+                    'description': table_description
                 }
                 
                 return JsonResponse(result)

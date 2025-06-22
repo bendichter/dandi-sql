@@ -331,7 +331,7 @@
                                                 <th>Data Type</th>
                                                 <th>Nullable</th>
                                                 <th>Default</th>
-                                                <th>Details</th>
+                                                <th>Help</th>
                                             </tr>
                                         </thead>
                                         <tbody id="schemaTableBody">
@@ -709,14 +709,18 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             row.appendChild(defaultCell);
             
-            // Details
-            const detailsCell = document.createElement('td');
-            const details = [];
-            if (column.max_length) details.push(`Max length: ${column.max_length}`);
-            if (column.precision) details.push(`Precision: ${column.precision}`);
-            if (column.scale) details.push(`Scale: ${column.scale}`);
-            detailsCell.innerHTML = details.length ? `<small>${details.join('<br>')}</small>` : '<span class="text-muted">—</span>';
-            row.appendChild(detailsCell);
+            // Help/Comments
+            const helpCell = document.createElement('td');
+            if (column.help_text) {
+                helpCell.innerHTML = `<small class="text-dark">${column.help_text}</small>`;
+            } else {
+                const details = [];
+                if (column.max_length) details.push(`Max length: ${column.max_length}`);
+                if (column.precision) details.push(`Precision: ${column.precision}`);
+                if (column.scale) details.push(`Scale: ${column.scale}`);
+                helpCell.innerHTML = details.length ? `<small class="text-muted">${details.join('<br>')}</small>` : '<span class="text-muted">—</span>';
+            }
+            row.appendChild(helpCell);
             
             tableBody.appendChild(row);
         });
