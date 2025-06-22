@@ -5,7 +5,6 @@ class BaseType(models.Model):
     """Base class for enumerated types"""
     identifier = models.TextField(blank=True, null=True, help_text="The identifier can be any url or a compact URI")
     name = models.CharField(max_length=500, blank=True, null=True, help_text="The name of the item")
-    schema_key = models.CharField(max_length=50, default="BaseType")
     
     class Meta:
         abstract = True
@@ -16,68 +15,90 @@ class BaseType(models.Model):
 
 class SpeciesType(BaseType):
     """Identifier for species of the sample"""
-    schema_key = models.CharField(max_length=50, default="SpeciesType")
     
     class Meta(BaseType.Meta):
         verbose_name_plural = "Species"
-
+        db_table_comment = "Species taxonomy information for experimental subjects"
+    
 
 class ApproachType(BaseType):
     """Identifier for approach used"""
-    schema_key = models.CharField(max_length=50, default="ApproachType")
+
+    class Meta(BaseType.Meta):
+        db_table_comment = "Experimental approaches used in studies (e.g., electrophysiology, microscopy, behavioral)"
 
 
 class MeasurementTechniqueType(BaseType):
     """Identifier for measurement technique used"""
-    schema_key = models.CharField(max_length=50, default="MeasurementTechniqueType")
+
+    class Meta(BaseType.Meta):
+        db_table_comment = "Specific measurement techniques used in experiments (e.g., patch clamp, calcium imaging)"
 
 
 class StandardsType(BaseType):
     """Identifier for data standard used"""
-    schema_key = models.CharField(max_length=50, default="StandardsType")
+
+    class Meta(BaseType.Meta):
+        db_table_comment = "Data format standards used (e.g., NWB, BIDS, OME-NGFF)"
 
 
 class AssayType(BaseType):
     """OBI based identifier for the assay(s) used"""
-    schema_key = models.CharField(max_length=50, default="AssayType")
+
+    class Meta(BaseType.Meta):
+        db_table_comment = "Ontology for Biomedical Investigations (OBI) based assay types used in experiments"
 
 
 class SampleType(BaseType):
     """OBI based identifier for the sample type used"""
-    schema_key = models.CharField(max_length=50, default="SampleType")
+
+    class Meta(BaseType.Meta):
+        db_table_comment = "OBI based sample types (e.g., tissue, cell culture, brain slice)"
 
 
 class Anatomy(BaseType):
     """UBERON or other identifier for anatomical part studied"""
-    schema_key = models.CharField(max_length=50, default="Anatomy")
+
+    class Meta(BaseType.Meta):
+        db_table_comment = "Anatomical structures using UBERON or other ontology identifiers (e.g., hippocampus, cortex)"
 
 
 class StrainType(BaseType):
     """Identifier for the strain of the sample"""
-    schema_key = models.CharField(max_length=50, default="StrainType")
+    
+    class Meta(BaseType.Meta):
+        db_table_comment = "Genetic strain information for experimental subjects"
 
 
 class SexType(BaseType):
     """Identifier for the sex of the sample"""
-    schema_key = models.CharField(max_length=50, default="SexType")
+
+    class Meta(BaseType.Meta):
+        db_table_comment = "Biological sex information for experimental subjects"
 
 
 class Disorder(BaseType):
     """Biolink, SNOMED, or other identifier for disorder studied"""
     dx_date = models.JSONField(blank=True, null=True, help_text="Dates of diagnosis")
-    schema_key = models.CharField(max_length=50, default="Disorder")
+
+    class Meta(BaseType.Meta):
+        db_table_comment = "Medical disorders and conditions using Biolink, SNOMED, or other medical ontologies"
 
 
 class GenericType(BaseType):
     """An object to capture any type for about"""
-    schema_key = models.CharField(max_length=50, default="GenericType")
+
+    class Meta(BaseType.Meta):
+        db_table_comment = "Generic type for categorizing dataset subject matter that doesn't fit other specific types"
 
 
 class ContactPoint(models.Model):
     """Contact point information"""
     email = models.EmailField(blank=True, null=True, help_text="Email address of contact")
     url = models.URLField(blank=True, null=True, help_text="A Web page to find information on how to contact")
-    schema_key = models.CharField(max_length=50, default="ContactPoint")
+
+    class Meta:
+        db_table_comment = "Contact information for reaching people or organizations associated with datasets"
     
     def __str__(self):
         return self.email or self.url or "Contact Point"
@@ -87,7 +108,9 @@ class Affiliation(models.Model):
     """Affiliation information"""
     identifier = models.TextField(blank=True, null=True, help_text="A ror.org identifier for institutions")
     name = models.TextField(help_text="Name of organization")
-    schema_key = models.CharField(max_length=50, default="Affiliation")
+    
+    class Meta:
+        db_table_comment = "Organizational affiliations for contributors (research institutions, universities, companies)"
     
     def __str__(self):
         return self.name
@@ -102,12 +125,15 @@ class Contributor(models.Model):
     ]
     
     identifier = models.TextField(blank=True, null=True, help_text="Use a common identifier such as ORCID for people or ROR for institutions")
-    name = models.TextField(blank=True, null=True)
-    email = models.EmailField(blank=True, null=True)
-    url = models.URLField(blank=True, null=True)
+    name = models.TextField(blank=True, null=True, help_text="Full name of the person or organization")
+    email = models.EmailField(blank=True, null=True, help_text="Email address of the contributor")
+    url = models.URLField(blank=True, null=True, help_text="Web page for the contributor (personal page, organization website)")
     award_number = models.TextField(blank=True, null=True, help_text="Identifier associated with a sponsored or gift award")
-    schema_key = models.CharField(max_length=20, choices=SCHEMA_KEY_CHOICES, default='Contributor')
+    schema_key = models.CharField(max_length=20, choices=SCHEMA_KEY_CHOICES, default='Contributor', help_text="Type of contributor (Person, Organization, or Contributor)")
     contact_point = models.JSONField(default=list, blank=True, help_text="Organization contact information")
+    
+    class Meta:
+        db_table_comment = "People and organizations that contribute to datasets (authors, data collectors, maintainers, etc.)"
     
     def __str__(self):
         return f"{self.name} ({self.schema_key})"
@@ -115,20 +141,23 @@ class Contributor(models.Model):
 
 class ContributorAffiliation(models.Model):
     """Many-to-many relationship between contributors and affiliations"""
-    contributor = models.ForeignKey(Contributor, on_delete=models.CASCADE)
-    affiliation = models.ForeignKey(Affiliation, on_delete=models.CASCADE)
+    contributor = models.ForeignKey(Contributor, on_delete=models.CASCADE, help_text="The contributor linked to this affiliation")
+    affiliation = models.ForeignKey(Affiliation, on_delete=models.CASCADE, help_text="The organization the contributor is affiliated with")
     
     class Meta:
         unique_together = ['contributor', 'affiliation']
+        db_table_comment = "Links contributors to their institutional affiliations"
 
 
 class Software(models.Model):
     """Software information"""
     identifier = models.TextField(blank=True, null=True, help_text="RRID of the software from scicrunch.org")
-    name = models.TextField()
-    version = models.CharField(max_length=100)
+    name = models.TextField(help_text="Name of the software")
+    version = models.CharField(max_length=100, help_text="Version number or string of the software")
     url = models.URLField(blank=True, null=True, help_text="Web page for the software")
-    schema_key = models.CharField(max_length=50, default="Software")
+    
+    class Meta:
+        db_table_comment = "Software tools and applications used in data collection, analysis, or processing"
     
     def __str__(self):
         return f"{self.name} v{self.version}"
@@ -137,9 +166,11 @@ class Software(models.Model):
 class Agent(models.Model):
     """Agent information"""
     identifier = models.TextField(blank=True, null=True, help_text="Identifier for an agent")
-    name = models.TextField()
-    url = models.URLField(blank=True, null=True)
-    schema_key = models.CharField(max_length=50, default="Agent")
+    name = models.TextField(help_text="Name of the agent")
+    url = models.URLField(blank=True, null=True, help_text="Web page for the agent")
+    
+    class Meta:
+        db_table_comment = "Generic agents (entities that can perform actions) in the data provenance"
     
     def __str__(self):
         return self.name
@@ -147,10 +178,12 @@ class Agent(models.Model):
 
 class Equipment(models.Model):
     """Equipment information"""
-    identifier = models.TextField(blank=True, null=True)
+    identifier = models.TextField(blank=True, null=True, help_text="Unique identifier for the equipment")
     name = models.CharField(max_length=150, help_text="A name for the equipment")
     description = models.TextField(blank=True, null=True, help_text="The description of the equipment")
-    schema_key = models.CharField(max_length=50, default="Equipment")
+    
+    class Meta:
+        db_table_comment = "Laboratory and research equipment used in experiments and data collection"
     
     def __str__(self):
         return self.name
@@ -165,59 +198,33 @@ class Activity(models.Model):
         ('PublishActivity', 'PublishActivity'),
     ]
     
-    identifier = models.TextField(blank=True, null=True)
+    identifier = models.TextField(blank=True, null=True, help_text="Unique identifier for the activity")
     name = models.CharField(max_length=150, help_text="The name of the activity")
     description = models.TextField(blank=True, null=True, help_text="The description of the activity")
-    start_date = models.DateTimeField(blank=True, null=True)
-    end_date = models.DateTimeField(blank=True, null=True)
-    schema_key = models.CharField(max_length=20, choices=SCHEMA_KEY_CHOICES, default='Activity')
+    start_date = models.DateTimeField(blank=True, null=True, help_text="When the activity started")
+    end_date = models.DateTimeField(blank=True, null=True, help_text="When the activity ended")
+    schema_key = models.CharField(max_length=20, choices=SCHEMA_KEY_CHOICES, default='Activity', help_text="Type of activity (Activity, Project, Session, or PublishActivity)")
+    
+    # Direct relationships - much cleaner than the complex ActivityAssociation model
+    contributors = models.ManyToManyField(Contributor, blank=True, related_name='activities', help_text="People or organizations associated with this activity")
+    software = models.ManyToManyField(Software, blank=True, related_name='activities', help_text="Software tools used in this activity")
+    agents = models.ManyToManyField(Agent, blank=True, related_name='activities', help_text="Generic agents involved in this activity")
+    equipment = models.ManyToManyField(Equipment, blank=True, related_name='activities', help_text="Equipment and instruments used in this activity")
+    
+    class Meta:
+        db_table_comment = "Research activities, projects, sessions, and publishing activities in the data provenance"
     
     def __str__(self):
         return f"{self.name} ({self.schema_key})"
 
 
-class ActivityAssociation(models.Model):
-    """Association between activities and contributors/software/agents"""
-    activity = models.ForeignKey(Activity, on_delete=models.CASCADE, related_name='associations')
-    contributor = models.ForeignKey(Contributor, on_delete=models.CASCADE, blank=True, null=True)
-    software = models.ForeignKey(Software, on_delete=models.CASCADE, blank=True, null=True)
-    agent = models.ForeignKey(Agent, on_delete=models.CASCADE, blank=True, null=True)
-    
-    class Meta:
-        constraints = [
-            models.CheckConstraint(
-                check=(
-                    models.Q(contributor__isnull=False) & 
-                    models.Q(software__isnull=True) & 
-                    models.Q(agent__isnull=True)
-                ) | (
-                    models.Q(contributor__isnull=True) & 
-                    models.Q(software__isnull=False) & 
-                    models.Q(agent__isnull=True)
-                ) | (
-                    models.Q(contributor__isnull=True) & 
-                    models.Q(software__isnull=True) & 
-                    models.Q(agent__isnull=False)
-                ),
-                name='only_one_association_type'
-            )
-        ]
-
-
-class ActivityEquipment(models.Model):
-    """Equipment used in activities"""
-    activity = models.ForeignKey(Activity, on_delete=models.CASCADE, related_name='equipment_used')
-    equipment = models.ForeignKey(Equipment, on_delete=models.CASCADE)
-    
-    class Meta:
-        unique_together = ['activity', 'equipment']
-
-
 class EthicsApproval(models.Model):
     """Information about ethics committee approval for project"""
-    identifier = models.TextField(help_text="Approved Protocol identifier")
-    contact_point = models.ForeignKey(ContactPoint, on_delete=models.SET_NULL, blank=True, null=True)
-    schema_key = models.CharField(max_length=50, default="EthicsApproval")
+    identifier = models.TextField(help_text="Approved Protocol identifier, often a number or alphanumeric string")
+    contact_point = models.ForeignKey(ContactPoint, on_delete=models.SET_NULL, blank=True, null=True, help_text="Information about the ethics approval committee")
+    
+    class Meta:
+        db_table_comment = "Ethics committee approvals for research projects involving human or animal subjects"
     
     def __str__(self):
         return f"Ethics Approval: {self.identifier}"
@@ -231,10 +238,12 @@ class AccessRequirements(models.Model):
     ]
     
     status = models.CharField(max_length=30, choices=ACCESS_STATUS_CHOICES, help_text="The access status of the item")
-    contact_point = models.ForeignKey(ContactPoint, on_delete=models.SET_NULL, blank=True, null=True)
-    description = models.TextField(blank=True, null=True, help_text="Information about access requirements")
+    contact_point = models.ForeignKey(ContactPoint, on_delete=models.SET_NULL, blank=True, null=True, help_text="Who or where to look for information about access")
+    description = models.TextField(blank=True, null=True, help_text="Information about access requirements when embargoed or restricted")
     embargoed_until = models.DateField(blank=True, null=True, help_text="Date on which embargo ends")
-    schema_key = models.CharField(max_length=50, default="AccessRequirements")
+    
+    class Meta:
+        db_table_comment = "Access restrictions and requirements for datasets (open access, embargoed, etc.)"
     
     def __str__(self):
         return self.status
@@ -279,13 +288,15 @@ class Resource(models.Model):
         ('dcite:IsPublishedIn', 'Is Published In'),
     ]
     
-    identifier = models.TextField(blank=True, null=True)
+    identifier = models.TextField(blank=True, null=True, help_text="Unique identifier for the resource (DOI, URL, etc.)")
     name = models.TextField(blank=True, null=True, help_text="A title of the resource")
     url = models.URLField(blank=True, null=True, help_text="URL of the resource")
-    repository = models.CharField(max_length=200, blank=True, null=True, help_text="Name of the repository")
+    repository = models.CharField(max_length=200, blank=True, null=True, help_text="Name of the repository in which the resource is housed")
     relation = models.CharField(max_length=30, choices=RELATION_CHOICES, help_text="How the resource is related to the dataset")
-    resource_type = models.CharField(max_length=50, blank=True, null=True, help_text="The type of resource")
-    schema_key = models.CharField(max_length=50, default="Resource")
+    resource_type = models.CharField(max_length=50, blank=True, null=True, help_text="The type of resource (Dataset, Software, Publication, etc.)")
+    
+    class Meta:
+        db_table_comment = "External resources related to datasets (publications, code repositories, other datasets, etc.)"
     
     def __str__(self):
         return self.name or self.url or f"Resource {self.pk}"
@@ -293,16 +304,16 @@ class Resource(models.Model):
 
 class AssetsSummary(models.Model):
     """Summary over assets contained in a dandiset"""
-    number_of_bytes = models.BigIntegerField()
-    number_of_files = models.IntegerField()
-    number_of_subjects = models.IntegerField(blank=True, null=True)
-    number_of_samples = models.IntegerField(blank=True, null=True)
-    number_of_cells = models.IntegerField(blank=True, null=True)
-    variable_measured = models.JSONField(default=list, blank=True)
-    schema_key = models.CharField(max_length=50, default="AssetsSummary")
+    number_of_bytes = models.BigIntegerField(help_text="Total size of all assets in bytes")
+    number_of_files = models.IntegerField(help_text="Total number of files/assets in the dandiset")
+    number_of_subjects = models.IntegerField(blank=True, null=True, help_text="Total number of experimental subjects")
+    number_of_samples = models.IntegerField(blank=True, null=True, help_text="Total number of biological samples")
+    number_of_cells = models.IntegerField(blank=True, null=True, help_text="Total number of cells recorded from")
+    variable_measured = models.JSONField(default=list, blank=True, help_text="List of variables/measurements recorded")
     
     class Meta:
         verbose_name_plural = "Assets summaries"
+        db_table_comment = "Statistical summaries of the assets contained within a dataset (file counts, subjects, etc.)"
     
     def __str__(self):
         return f"Assets summary: {self.number_of_files} files, {self.number_of_bytes} bytes"
@@ -316,6 +327,7 @@ class AssetsSummarySpecies(models.Model):
     class Meta:
         unique_together = ['assets_summary', 'species']
         verbose_name_plural = "Assets summary species"
+        db_table_comment = "Links asset summaries to the species involved in the datasets"
 
 
 class AssetsSummaryApproach(models.Model):
@@ -326,6 +338,7 @@ class AssetsSummaryApproach(models.Model):
     class Meta:
         unique_together = ['assets_summary', 'approach']
         verbose_name_plural = "Assets summary approaches"
+        db_table_comment = "Links asset summaries to the experimental approaches used in the datasets"
 
 
 class AssetsSummaryDataStandard(models.Model):
@@ -336,6 +349,7 @@ class AssetsSummaryDataStandard(models.Model):
     class Meta:
         unique_together = ['assets_summary', 'data_standard']
         verbose_name_plural = "Assets summary data standards"
+        db_table_comment = "Links asset summaries to the data format standards used in the datasets"
 
 
 class AssetsSummaryMeasurementTechnique(models.Model):
@@ -346,6 +360,7 @@ class AssetsSummaryMeasurementTechnique(models.Model):
     class Meta:
         unique_together = ['assets_summary', 'measurement_technique']
         verbose_name_plural = "Assets summary measurement techniques"
+        db_table_comment = "Links asset summaries to the measurement techniques used in the datasets"
 
 
 class Dandiset(models.Model):
@@ -371,40 +386,44 @@ class Dandiset(models.Model):
                                        related_name='newer_versions', help_text="Previous version of this dandiset")
     
     # Schema information
-    schema_version = models.CharField(max_length=20, default="0.6.4")
-    schema_key = models.CharField(max_length=50, default="Dandiset")
+    schema_version = models.CharField(max_length=20, default="0.6.4", help_text="Version of the DANDI schema used for this dandiset")
     
     # Basic metadata
     name = models.CharField(max_length=500, help_text="A title associated with the Dandiset")
     description = models.TextField(max_length=10000, help_text="A description of the Dandiset")
     
     # Dates
-    date_created = models.DateTimeField(blank=True, null=True)
-    date_modified = models.DateTimeField(blank=True, null=True)
-    date_published = models.DateTimeField(blank=True, null=True)
+    date_created = models.DateTimeField(blank=True, null=True, help_text="When the dandiset was originally created")
+    date_modified = models.DateTimeField(blank=True, null=True, help_text="Last modification date and time")
+    date_published = models.DateTimeField(blank=True, null=True, help_text="When the dandiset was published")
     
     # License
-    license = models.JSONField(default=list, help_text="Licenses associated with the item")
+    license = models.JSONField(default=list, help_text="Licenses associated with the item (CC0, CC-BY-4.0, etc.)")
     
     # Citation and version
-    citation = models.TextField(blank=True, null=True)
+    citation = models.TextField(blank=True, null=True, help_text="Automatically generated citation for this dandiset")
     
     # URLs
     url = models.URLField(blank=True, null=True, help_text="permalink to the item")
     repository = models.URLField(blank=True, null=True, help_text="location of the item")
-    doi = models.CharField(max_length=200, blank=True, null=True)
+    doi = models.CharField(max_length=200, blank=True, null=True, help_text="Digital Object Identifier for this dandiset")
     
     # JSON fields for arrays
     keywords = models.JSONField(default=list, blank=True, help_text="Keywords used to describe this content")
     study_target = models.JSONField(default=list, blank=True, help_text="Objectives or specific questions of the study")
     protocol = models.JSONField(default=list, blank=True, help_text="A list of persistent URLs describing the protocol")
     acknowledgement = models.TextField(blank=True, null=True, help_text="Any acknowledgments not covered by contributors")
-    manifest_location = models.JSONField(default=list, blank=True)
+    manifest_location = models.JSONField(default=list, blank=True, help_text="URLs to dandiset manifest files")
     
     # Relationships
-    assets_summary = models.OneToOneField(AssetsSummary, on_delete=models.SET_NULL, blank=True, null=True)
+    assets_summary = models.OneToOneField(AssetsSummary, on_delete=models.SET_NULL, blank=True, null=True, help_text="Statistical summary of the assets in this dandiset")
     published_by = models.ForeignKey(Activity, on_delete=models.SET_NULL, blank=True, null=True, 
-                                   limit_choices_to={'schema_key': 'PublishActivity'})
+                                   limit_choices_to={'schema_key': 'PublishActivity'}, help_text="Publishing activity that made this dandiset public")
+    
+    # Direct relationships - much cleaner than DandisetAbout with complex constraints
+    disorders = models.ManyToManyField(Disorder, blank=True, related_name='dandisets', help_text="Medical disorders and conditions studied in this dataset")
+    anatomy = models.ManyToManyField(Anatomy, blank=True, related_name='dandisets', help_text="Anatomical structures studied in this dataset")
+    generic_types = models.ManyToManyField(GenericType, blank=True, related_name='dandisets', help_text="Generic subject matter categories for this dataset")
     
     # Sync tracking
     created_by_sync = models.ForeignKey('SyncTracker', on_delete=models.SET_NULL, blank=True, null=True,
@@ -413,12 +432,13 @@ class Dandiset(models.Model):
                                             related_name='dandisets_modified', help_text="Last sync operation that modified this dandiset")
     
     # Timestamps
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True, help_text="When this record was created in the local database")
+    updated_at = models.DateTimeField(auto_now=True, help_text="When this record was last updated in the local database")
     
     class Meta:
         ordering = ['base_id', '-version_order']
         unique_together = [('base_id', 'version')]
+        db_table_comment = "DANDI datasets - the main repository entities that contain collections of neuroscience data files"
     
     def __str__(self):
         return f"{self.dandi_id}: {self.name}"
@@ -459,38 +479,13 @@ class DandisetContributor(models.Model):
     
     class Meta:
         unique_together = ['dandiset', 'contributor']
+        db_table_comment = "Links datasets to their contributors with specific roles and citation preferences"
     
     def __str__(self):
         roles = ', '.join(self.role_name) if self.role_name else 'No roles'
         return f"{self.contributor.name} - {roles} in {self.dandiset.base_id}"
 
 
-class DandisetAbout(models.Model):
-    """About/subject matter for dandisets"""
-    dandiset = models.ForeignKey(Dandiset, on_delete=models.CASCADE, related_name='about')
-    disorder = models.ForeignKey(Disorder, on_delete=models.CASCADE, blank=True, null=True)
-    anatomy = models.ForeignKey(Anatomy, on_delete=models.CASCADE, blank=True, null=True)
-    generic_type = models.ForeignKey(GenericType, on_delete=models.CASCADE, blank=True, null=True)
-    
-    class Meta:
-        constraints = [
-            models.CheckConstraint(
-                check=(
-                    models.Q(disorder__isnull=False) & 
-                    models.Q(anatomy__isnull=True) & 
-                    models.Q(generic_type__isnull=True)
-                ) | (
-                    models.Q(disorder__isnull=True) & 
-                    models.Q(anatomy__isnull=False) & 
-                    models.Q(generic_type__isnull=True)
-                ) | (
-                    models.Q(disorder__isnull=True) & 
-                    models.Q(anatomy__isnull=True) & 
-                    models.Q(generic_type__isnull=False)
-                ),
-                name='only_one_about_type'
-            )
-        ]
 
 
 class DandisetAccessRequirements(models.Model):
@@ -500,6 +495,7 @@ class DandisetAccessRequirements(models.Model):
     
     class Meta:
         unique_together = ['dandiset', 'access_requirement']
+        db_table_comment = "Links datasets to their access restrictions and requirements"
 
 
 class DandisetRelatedResource(models.Model):
@@ -509,6 +505,7 @@ class DandisetRelatedResource(models.Model):
     
     class Meta:
         unique_together = ['dandiset', 'resource']
+        db_table_comment = "Links datasets to external related resources (publications, code, other datasets)"
 
 
 class DandisetEthicsApproval(models.Model):
@@ -518,6 +515,7 @@ class DandisetEthicsApproval(models.Model):
     
     class Meta:
         unique_together = ['dandiset', 'ethics_approval']
+        db_table_comment = "Links datasets to their ethics committee approvals"
 
 
 class DandisetWasGeneratedBy(models.Model):
@@ -527,16 +525,19 @@ class DandisetWasGeneratedBy(models.Model):
     
     class Meta:
         unique_together = ['dandiset', 'activity']
+        db_table_comment = "Links datasets to the research projects that generated them"
 
 
 class Participant(models.Model):
     """Participant/subject information"""
     identifier = models.CharField(max_length=100, help_text="Subject ID")
-    species = models.ForeignKey(SpeciesType, on_delete=models.CASCADE, blank=True, null=True)
-    sex = models.ForeignKey(SexType, on_delete=models.CASCADE, blank=True, null=True)
+    species = models.ForeignKey(SpeciesType, on_delete=models.CASCADE, blank=True, null=True, help_text="Species of the experimental subject")
+    sex = models.ForeignKey(SexType, on_delete=models.CASCADE, blank=True, null=True, help_text="Biological sex of the experimental subject")
     age = models.JSONField(blank=True, null=True, help_text="Age information with value and unit")
-    strain = models.ForeignKey(StrainType, on_delete=models.CASCADE, blank=True, null=True)
-    schema_key = models.CharField(max_length=50, default="Participant")
+    strain = models.ForeignKey(StrainType, on_delete=models.CASCADE, blank=True, null=True, help_text="Genetic strain of the experimental subject")
+    
+    class Meta:
+        db_table_comment = "Research participants and experimental subjects with demographic and biological information"
     
     def __str__(self):
         return f"Participant {self.identifier}"
@@ -557,8 +558,7 @@ class Asset(models.Model):
     identifier = models.CharField(max_length=100, help_text="Asset identifier")
     
     # Schema information  
-    schema_version = models.CharField(max_length=20, default="0.6.7")
-    schema_key = models.CharField(max_length=50, default="Asset")
+    schema_version = models.CharField(max_length=20, default="0.6.7", help_text="Version of the DANDI schema used for this asset")
     
     # File information
     content_size = models.BigIntegerField(help_text="Size of the asset in bytes")
@@ -566,9 +566,9 @@ class Asset(models.Model):
                                      help_text="Media type, typically expressed using a MIME format")
     
     # Dates
-    date_modified = models.DateTimeField(blank=True, null=True)
-    date_published = models.DateTimeField(blank=True, null=True)
-    blob_date_modified = models.DateTimeField(blank=True, null=True)
+    date_modified = models.DateTimeField(blank=True, null=True, help_text="When the asset metadata was last modified")
+    date_published = models.DateTimeField(blank=True, null=True, help_text="When the asset was published")
+    blob_date_modified = models.DateTimeField(blank=True, null=True, help_text="When the actual file content was last modified")
     
     # JSON fields
     digest = models.JSONField(help_text="Digest/checksum information")
@@ -576,9 +576,16 @@ class Asset(models.Model):
     variable_measured = models.JSONField(default=list, blank=True, help_text="Variables measured in this asset")
     
     # Relationships - Assets can belong to multiple dandisets through AssetDandiset
-    dandisets = models.ManyToManyField(Dandiset, through='AssetDandiset', related_name='assets')
+    dandisets = models.ManyToManyField(Dandiset, through='AssetDandiset', related_name='assets', help_text="Dandisets that contain this asset")
     published_by = models.ForeignKey(Activity, on_delete=models.SET_NULL, blank=True, null=True,
-                                   limit_choices_to={'schema_key': 'PublishActivity'})
+                                   limit_choices_to={'schema_key': 'PublishActivity'}, help_text="Publishing activity that made this asset public")
+    
+    # Direct many-to-many relationships - much cleaner than intermediate models
+    access_requirements = models.ManyToManyField(AccessRequirements, blank=True, related_name='assets', help_text="Access restrictions and requirements for this asset")
+    approaches = models.ManyToManyField(ApproachType, blank=True, related_name='assets', help_text="Experimental approaches used to collect this asset's data")
+    measurement_techniques = models.ManyToManyField(MeasurementTechniqueType, blank=True, related_name='assets', help_text="Specific measurement techniques used to collect this asset's data")
+    participants = models.ManyToManyField(Participant, blank=True, related_name='assets', help_text="Research subjects or participants this asset's data was collected from")
+    activities = models.ManyToManyField(Activity, blank=True, related_name='generated_assets', help_text="Experimental sessions or activities that generated this asset")
     
     # Sync tracking
     created_by_sync = models.ForeignKey('SyncTracker', on_delete=models.SET_NULL, blank=True, null=True,
@@ -587,11 +594,12 @@ class Asset(models.Model):
                                             related_name='assets_modified', help_text="Last sync operation that modified this asset")
     
     # Timestamps
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True, help_text="When this record was created in the local database")
+    updated_at = models.DateTimeField(auto_now=True, help_text="When this record was last updated in the local database")
     
     class Meta:
         ordering = ['dandi_asset_id']
+        db_table_comment = "Individual data files within datasets (NWB files, images, videos, etc.)"
     
     def __str__(self):
         return f"{self.dandi_asset_id}"
@@ -613,54 +621,12 @@ class AssetDandiset(models.Model):
         unique_together = ['asset', 'dandiset']
         verbose_name = "Asset-Dandiset Association"
         verbose_name_plural = "Asset-Dandiset Associations"
+        db_table_comment = "Links individual data files to the datasets they belong to, including file paths"
     
     def __str__(self):
         return f"{self.asset.dandi_asset_id} ({self.path}) in {self.dandiset.dandi_id}"
 
 
-class AssetAccess(models.Model):
-    """Access requirements for assets"""
-    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name='access_requirements')
-    access_requirement = models.ForeignKey(AccessRequirements, on_delete=models.CASCADE)
-    
-    class Meta:
-        unique_together = ['asset', 'access_requirement']
-
-
-class AssetApproach(models.Model):
-    """Approaches used in assets"""
-    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name='approach_relations')
-    approach = models.ForeignKey(ApproachType, on_delete=models.CASCADE)
-    
-    class Meta:
-        unique_together = ['asset', 'approach']
-
-
-class AssetMeasurementTechnique(models.Model):
-    """Measurement techniques used in assets"""
-    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name='measurement_technique_relations')
-    measurement_technique = models.ForeignKey(MeasurementTechniqueType, on_delete=models.CASCADE)
-    
-    class Meta:
-        unique_together = ['asset', 'measurement_technique']
-
-
-class AssetWasAttributedTo(models.Model):
-    """Participants/subjects that assets are attributed to"""
-    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name='attributed_to')
-    participant = models.ForeignKey(Participant, on_delete=models.CASCADE)
-    
-    class Meta:
-        unique_together = ['asset', 'participant']
-
-
-class AssetWasGeneratedBy(models.Model):
-    """Activities/sessions that generated assets"""
-    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name='was_generated_by')
-    activity = models.ForeignKey(Activity, on_delete=models.CASCADE)
-    
-    class Meta:
-        unique_together = ['asset', 'activity']
 
 
 class SyncTracker(models.Model):
@@ -696,6 +662,7 @@ class SyncTracker(models.Model):
         get_latest_by = 'created_at'
         verbose_name = "Synchronization Record"
         verbose_name_plural = "Synchronization Records"
+        db_table_comment = "Tracks synchronization operations from the DANDI Archive API to keep local data up-to-date"
     
     def __str__(self):
         return f"{self.sync_type} sync ({self.status}) at {self.last_sync_timestamp}"
@@ -715,6 +682,7 @@ class LindiMetadata(models.Model):
         verbose_name = "LINDI Metadata"
         verbose_name_plural = "LINDI Metadata"
         ordering = ['-processed_at']
+        db_table_comment = "Stores LINDI (Linked Data Interface) metadata for efficient access to NWB file structure without downloading"
     
     def __str__(self):
         return f"LINDI metadata for {self.asset.dandi_asset_id}"

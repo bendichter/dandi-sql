@@ -12,14 +12,12 @@ from .models import (
     ApproachType, MeasurementTechniqueType, StandardsType, AssetsSummary,
     Activity, Software, Agent, Equipment, EthicsApproval, AccessRequirements,
     Resource, Anatomy, Disorder, GenericType, AssayType, SampleType,
-    StrainType, SexType, DandisetContributor, DandisetAbout,
+    StrainType, SexType, DandisetContributor,
     DandisetAccessRequirements, DandisetRelatedResource, DandisetEthicsApproval,
-    DandisetWasGeneratedBy, ContributorAffiliation, ActivityAssociation,
-    ActivityEquipment, AssetsSummarySpecies, AssetsSummaryApproach,
+    DandisetWasGeneratedBy, ContributorAffiliation,
+    AssetsSummarySpecies, AssetsSummaryApproach,
     AssetsSummaryDataStandard, AssetsSummaryMeasurementTechnique,
-    Asset, Participant, AssetDandiset, AssetAccess, AssetApproach, 
-    AssetMeasurementTechnique, AssetWasAttributedTo, AssetWasGeneratedBy,
-    SyncTracker
+    Asset, Participant, AssetDandiset, SyncTracker
 )
 
 
@@ -53,10 +51,6 @@ class ReadOnlyTabularInline(admin.TabularInline):
 
 class DandisetContributorInline(ReadOnlyTabularInline):
     model = DandisetContributor
-
-
-class DandisetAboutInline(ReadOnlyTabularInline):
-    model = DandisetAbout
 
 
 class DandisetAccessRequirementsInline(ReadOnlyTabularInline):
@@ -175,7 +169,6 @@ class DandisetAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     inlines = [
         DandisetAssetsInline,
         DandisetContributorInline,
-        DandisetAboutInline,
         DandisetAccessRequirementsInline,
         DandisetRelatedResourceInline,
     ]
@@ -185,7 +178,7 @@ class DandisetAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
             'fields': ('dandi_id', 'identifier', 'doi')
         }),
         ('Basic Information', {
-            'fields': ('name', 'description', 'citation', 'version', 'schema_version', 'schema_key')
+            'fields': ('name', 'description', 'citation', 'version', 'schema_version')
         }),
         ('Dates', {
             'fields': ('date_created', 'date_modified', 'date_published')
@@ -326,27 +319,6 @@ class GenericTypeAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     search_fields = ['name', 'identifier']
 
 
-# Asset-related inlines
-class AssetAccessInline(ReadOnlyTabularInline):
-    model = AssetAccess
-
-
-class AssetApproachInline(ReadOnlyTabularInline):
-    model = AssetApproach
-
-
-class AssetMeasurementTechniqueInline(ReadOnlyTabularInline):
-    model = AssetMeasurementTechnique
-
-
-class AssetWasAttributedToInline(ReadOnlyTabularInline):
-    model = AssetWasAttributedTo
-
-
-class AssetWasGeneratedByInline(ReadOnlyTabularInline):
-    model = AssetWasGeneratedBy
-
-
 class AssetDandisetInline(ReadOnlyTabularInline):
     model = AssetDandiset
     extra = 0
@@ -376,11 +348,6 @@ class AssetAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     
     inlines = [
         AssetDandisetInline,
-        AssetAccessInline,
-        AssetApproachInline,
-        AssetMeasurementTechniqueInline,
-        AssetWasAttributedToInline,
-        AssetWasGeneratedByInline,
     ]
     
     fieldsets = (
@@ -391,7 +358,7 @@ class AssetAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
             'fields': ('content_size', 'encoding_format', 'digest', 'content_url')
         }),
         ('Schema Information', {
-            'fields': ('schema_version', 'schema_key')
+            'fields': ('schema_version',)
         }),
         ('Dates', {
             'fields': ('date_modified', 'date_published', 'blob_date_modified')
@@ -422,7 +389,7 @@ class AssetDandisetAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
 
 @admin.register(Participant)
 class ParticipantAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
-    list_display = ['identifier', 'species', 'sex', 'schema_key']
+    list_display = ['identifier', 'species', 'sex']
     list_filter = ['species', 'sex', 'strain']
     search_fields = ['identifier']
 

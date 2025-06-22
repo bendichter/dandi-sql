@@ -82,9 +82,9 @@
                 <div class="card-body">
                     <div class="row">
                         <div class="col-md-6">
-                            <h6>Available Tables</h6>
+                            <h6>Available Tables <small class="text-muted">(click to view schema)</small></h6>
                             <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
-                                <table class="table table-sm">
+                                <table class="table table-sm table-hover">
                                     <thead>
                                         <tr>
                                             <th>Table Name</th>
@@ -93,7 +93,13 @@
                                     <tbody>
                                         {% for table in allowed_tables %}
                                         <tr>
-                                            <td><code>{{ table }}</code></td>
+                                            <td>
+                                                <code class="table-name-link" 
+                                                      data-table-name="{{ table.full_name }}" 
+                                                      style="cursor: pointer; color: #0066cc;">
+                                                    {{ table.display_name }}
+                                                </code>
+                                            </td>
                                         </tr>
                                         {% endfor %}
                                     </tbody>
@@ -288,6 +294,62 @@
                     </div>
                 </div>
                 {% endfor %}
+            </div>
+        </div>
+        
+        <!-- Table Schema Modal -->
+        <div class="modal fade" id="tableSchemaModal" tabindex="-1" aria-labelledby="tableSchemaModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="tableSchemaModalLabel">
+                            <i class="fas fa-table"></i> Table Schema: <span id="modalTableName"></span>
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="schemaLoadingSpinner" class="text-center">
+                            <i class="fas fa-spinner fa-spin fa-2x text-primary"></i>
+                            <p class="mt-2">Loading table schema...</p>
+                        </div>
+                        <div id="schemaError" class="alert alert-danger" style="display: none;">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <span id="schemaErrorMessage"></span>
+                        </div>
+                        <div id="schemaContent" style="display: none;">
+                            <div class="mb-3" id="tableDescription" style="display: none;">
+                                <h6>Description:</h6>
+                                <p class="text-muted" id="tableDescriptionText"></p>
+                            </div>
+                            <div class="mb-3">
+                                <h6>Columns (<span id="columnCount"></span>):</h6>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-striped">
+                                        <thead class="table-dark">
+                                            <tr>
+                                                <th>Column Name</th>
+                                                <th>Data Type</th>
+                                                <th>Nullable</th>
+                                                <th>Default</th>
+                                                <th>Details</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="schemaTableBody">
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            <div class="mt-3">
+                                <button type="button" class="btn btn-outline-primary btn-sm" id="insertTableNameBtn">
+                                    <i class="fas fa-plus"></i> Insert Table Name into Query
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" id="generateSelectBtn">
+                                    <i class="fas fa-code"></i> Generate SELECT Statement
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -532,6 +594,178 @@ document.addEventListener('DOMContentLoaded', function() {
             URL.revokeObjectURL(url);
         }
     }
+    
+    // Table name click functionality
+    document.querySelectorAll('.table-name-link').forEach(link => {
+        link.addEventListener('click', function() {
+            const tableName = this.getAttribute('data-table-name');
+            const displayName = this.textContent;
+            showTableSchema(tableName, displayName);
+        });
+    });
+    
+    // Table schema modal functionality
+    let currentTableName = '';
+    let currentSchema = null;
+    
+    function showTableSchema(tableName, displayName) {
+        currentTableName = tableName;
+        
+        // Set modal title
+        document.getElementById('modalTableName').textContent = displayName;
+        
+        // Reset modal state
+        document.getElementById('schemaLoadingSpinner').style.display = 'block';
+        document.getElementById('schemaError').style.display = 'none';
+        document.getElementById('schemaContent').style.display = 'none';
+        
+        // Show modal
+        const modal = new bootstrap.Modal(document.getElementById('tableSchemaModal'));
+        modal.show();
+        
+        // Fetch schema data
+        fetch('/api/sql/table-schema/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ table_name: tableName })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                currentSchema = data;
+                displaySchema(data);
+            } else {
+                showSchemaError(data.error || 'Failed to load table schema');
+            }
+        })
+        .catch(error => {
+            console.error('Schema fetch error:', error);
+            showSchemaError('Network error while loading schema');
+        })
+        .finally(() => {
+            document.getElementById('schemaLoadingSpinner').style.display = 'none';
+        });
+    }
+    
+    function displaySchema(schemaData) {
+        // Hide loading, show content
+        document.getElementById('schemaLoadingSpinner').style.display = 'none';
+        document.getElementById('schemaError').style.display = 'none';
+        document.getElementById('schemaContent').style.display = 'block';
+        
+        // Show description if available
+        if (schemaData.description) {
+            document.getElementById('tableDescription').style.display = 'block';
+            document.getElementById('tableDescriptionText').textContent = schemaData.description;
+        } else {
+            document.getElementById('tableDescription').style.display = 'none';
+        }
+        
+        // Set column count
+        document.getElementById('columnCount').textContent = schemaData.column_count;
+        
+        // Populate schema table
+        const tableBody = document.getElementById('schemaTableBody');
+        tableBody.innerHTML = '';
+        
+        schemaData.columns.forEach(column => {
+            const row = document.createElement('tr');
+            
+            // Column name
+            const nameCell = document.createElement('td');
+            nameCell.innerHTML = `<code>${column.name}</code>`;
+            row.appendChild(nameCell);
+            
+            // Data type
+            const typeCell = document.createElement('td');
+            let typeDisplay = column.type;
+            if (column.max_length) {
+                typeDisplay += `(${column.max_length})`;
+            } else if (column.precision && column.scale) {
+                typeDisplay += `(${column.precision},${column.scale})`;
+            } else if (column.precision) {
+                typeDisplay += `(${column.precision})`;
+            }
+            typeCell.innerHTML = `<span class="badge bg-info">${typeDisplay}</span>`;
+            row.appendChild(typeCell);
+            
+            // Nullable
+            const nullableCell = document.createElement('td');
+            if (column.nullable) {
+                nullableCell.innerHTML = '<span class="badge bg-warning">YES</span>';
+            } else {
+                nullableCell.innerHTML = '<span class="badge bg-success">NO</span>';
+            }
+            row.appendChild(nullableCell);
+            
+            // Default
+            const defaultCell = document.createElement('td');
+            if (column.default) {
+                defaultCell.innerHTML = `<code>${column.default}</code>`;
+            } else {
+                defaultCell.innerHTML = '<span class="text-muted">—</span>';
+            }
+            row.appendChild(defaultCell);
+            
+            // Details
+            const detailsCell = document.createElement('td');
+            const details = [];
+            if (column.max_length) details.push(`Max length: ${column.max_length}`);
+            if (column.precision) details.push(`Precision: ${column.precision}`);
+            if (column.scale) details.push(`Scale: ${column.scale}`);
+            detailsCell.innerHTML = details.length ? `<small>${details.join('<br>')}</small>` : '<span class="text-muted">—</span>';
+            row.appendChild(detailsCell);
+            
+            tableBody.appendChild(row);
+        });
+    }
+    
+    function showSchemaError(errorMessage) {
+        document.getElementById('schemaLoadingSpinner').style.display = 'none';
+        document.getElementById('schemaContent').style.display = 'none';
+        document.getElementById('schemaError').style.display = 'block';
+        document.getElementById('schemaErrorMessage').textContent = errorMessage;
+    }
+    
+    // Insert table name button
+    document.getElementById('insertTableNameBtn').addEventListener('click', function() {
+        if (currentTableName) {
+            const textarea = document.getElementById('sql');
+            const cursorPos = textarea.selectionStart;
+            const textBefore = textarea.value.substring(0, cursorPos);
+            const textAfter = textarea.value.substring(cursorPos);
+            
+            textarea.value = textBefore + currentTableName + textAfter;
+            textarea.focus();
+            textarea.setSelectionRange(cursorPos + currentTableName.length, cursorPos + currentTableName.length);
+            
+            // Close modal
+            const modal = bootstrap.Modal.getInstance(document.getElementById('tableSchemaModal'));
+            modal.hide();
+        }
+    });
+    
+    // Generate SELECT statement button
+    document.getElementById('generateSelectBtn').addEventListener('click', function() {
+        if (currentSchema && currentSchema.columns) {
+            const columns = currentSchema.columns.slice(0, 10).map(col => col.name).join(',\n    ');
+            const moreColumns = currentSchema.columns.length > 10 ? `\n    -- ... and ${currentSchema.columns.length - 10} more columns` : '';
+            
+            const selectStatement = `SELECT 
+    ${columns}${moreColumns}
+FROM ${currentTableName}
+LIMIT 20;`;
+            
+            document.getElementById('sql').value = selectStatement;
+            document.getElementById('sql').focus();
+            
+            // Close modal
+            const modal = bootstrap.Modal.getInstance(document.getElementById('tableSchemaModal'));
+            modal.hide();
+        }
+    });
 });
 </script>
 {% endblock %}

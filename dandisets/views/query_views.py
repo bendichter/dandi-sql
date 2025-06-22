@@ -251,24 +251,142 @@ LIMIT 20"""
 
 
 def get_allowed_tables():
-    """Get list of allowed tables for documentation."""
+    """Get list of allowed tables for documentation with display names."""
     from django.db import connection
     
     allowed_tables = []
     try:
         with connection.cursor() as cursor:
-            for prefix in SQLSecurityValidator.ALLOWED_TABLE_PREFIXES:
-                cursor.execute("""
-                    SELECT table_name 
-                    FROM information_schema.tables 
-                    WHERE table_name LIKE %s
-                    AND table_schema = 'public'
-                    ORDER BY table_name
-                """, [f"{prefix}%"])
-                
-                for row in cursor.fetchall():
-                    allowed_tables.append(row[0])
+            # Get all existing table names first
+            cursor.execute("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public'
+                ORDER BY table_name
+            """)
+            
+            existing_tables = {row[0] for row in cursor.fetchall()}
+            
+            # Filter to only allowed tables that actually exist
+            for table_name in SQLSecurityValidator.ALLOWED_TABLE_PREFIXES:
+                if table_name in existing_tables:
+                    # Remove "dandisets_" prefix for display
+                    display_name = table_name.replace('dandisets_', '') if table_name.startswith('dandisets_') else table_name
+                    allowed_tables.append({
+                        'full_name': table_name,
+                        'display_name': display_name
+                    })
     except Exception as e:
         logger.error(f"Error getting allowed tables: {e}")
     
-    return sorted(allowed_tables)
+    return sorted(allowed_tables, key=lambda x: x['display_name'])
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def get_table_schema_ajax(request):
+    """
+    AJAX endpoint for getting table schema information.
+    
+    Returns JSON response with table schema details.
+    """
+    try:
+        # Parse request body
+        try:
+            body = json.loads(request.body)
+            table_name = body.get('table_name', '').strip()
+        except json.JSONDecodeError:
+            return JsonResponse({
+                'success': False,
+                'error': 'Invalid JSON in request body'
+            }, status=400)
+        
+        if not table_name:
+            return JsonResponse({
+                'success': False,
+                'error': 'No table name provided'
+            }, status=400)
+        
+        # Validate table access
+        if not SQLSecurityValidator._is_table_allowed(table_name):
+            return JsonResponse({
+                'success': False,
+                'error': f'Access to table "{table_name}" is not allowed'
+            }, status=403)
+        
+        # Get table schema
+        from django.db import connection
+        
+        try:
+            with connection.cursor() as cursor:
+                # Get columns for the table
+                cursor.execute("""
+                    SELECT 
+                        column_name, 
+                        data_type, 
+                        is_nullable, 
+                        column_default,
+                        character_maximum_length,
+                        numeric_precision,
+                        numeric_scale
+                    FROM information_schema.columns 
+                    WHERE table_name = %s 
+                    AND table_schema = 'public'
+                    ORDER BY ordinal_position
+                """, [table_name])
+                
+                columns = []
+                for row in cursor.fetchall():
+                    column_info = {
+                        'name': row[0],
+                        'type': row[1],
+                        'nullable': row[2] == 'YES',
+                        'default': row[3],
+                    }
+                    
+                    # Add length/precision info for relevant types
+                    if row[4]:  # character_maximum_length
+                        column_info['max_length'] = row[4]
+                    if row[5]:  # numeric_precision
+                        column_info['precision'] = row[5]
+                    if row[6]:  # numeric_scale
+                        column_info['scale'] = row[6]
+                    
+                    columns.append(column_info)
+                
+                # Get table comment if available
+                cursor.execute("""
+                    SELECT obj_description(oid) 
+                    FROM pg_class 
+                    WHERE relname = %s
+                """, [table_name])
+                
+                table_comment = None
+                comment_row = cursor.fetchone()
+                if comment_row and comment_row[0]:
+                    table_comment = comment_row[0]
+                
+                result = {
+                    'success': True,
+                    'table_name': table_name,
+                    'display_name': table_name.replace('dandisets_', '') if table_name.startswith('dandisets_') else table_name,
+                    'columns': columns,
+                    'column_count': len(columns),
+                    'description': table_comment
+                }
+                
+                return JsonResponse(result)
+                
+        except Exception as db_error:
+            logger.error(f"Database error getting schema for {table_name}: {db_error}")
+            return JsonResponse({
+                'success': False,
+                'error': f'Database error: {str(db_error)}'
+            }, status=500)
+        
+    except Exception as e:
+        logger.error(f"Table schema AJAX error: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': f'Internal server error: {str(e)}'
+        }, status=500)

@@ -18,12 +18,10 @@ from dandisets.models import (
     MeasurementTechniqueType, StandardsType, AssetsSummary,
     ContactPoint, AccessRequirements, Activity, Resource,
     Anatomy, GenericType, Disorder, DandisetContributor,
-    DandisetAbout, DandisetAccessRequirements, DandisetRelatedResource,
+    DandisetAccessRequirements, DandisetRelatedResource,
     AssetsSummarySpecies, AssetsSummaryApproach, AssetsSummaryDataStandard,
     AssetsSummaryMeasurementTechnique, Affiliation, ContributorAffiliation,
-    Software, ActivityAssociation, Asset, Participant, AssetAccess,
-    AssetApproach, AssetMeasurementTechnique, AssetWasAttributedTo,
-    AssetWasGeneratedBy, SexType, AssetDandiset, SyncTracker, LindiMetadata
+    Software, Asset, Participant, SexType, AssetDandiset, SyncTracker, LindiMetadata
 )
 
 
@@ -1431,17 +1429,19 @@ class Command(BaseCommand):
                     if updated:
                         relationship.save()
 
-        # Load about section
+        # Load about section - now using direct many-to-many relationships
         for about_data in data.get('about', []):
             about_obj, field_name = self._load_about_object(about_data)
             if about_obj and field_name:
-                kwargs = {
-                    'dandiset': dandiset,
-                    field_name: about_obj
-                }
-                DandisetAbout.objects.get_or_create(**kwargs)
+                # Use the appropriate many-to-many field on the dandiset
+                if field_name == 'anatomy':
+                    dandiset.anatomy.add(about_obj)
+                elif field_name == 'disorder':
+                    dandiset.disorders.add(about_obj)
+                elif field_name == 'generic_type':
+                    dandiset.generic_types.add(about_obj)
 
-        # Load access requirements
+        # Load access requirements - using intermediate model
         for access_data in data.get('access', []):
             access_req = self._load_access_requirements(access_data)
             if access_req:
@@ -1450,7 +1450,7 @@ class Command(BaseCommand):
                     access_requirement=access_req
                 )
 
-        # Load related resources
+        # Load related resources - using intermediate model
         for resource_data in data.get('relatedResource', []):
             resource = self._load_resource(resource_data)
             if resource:
@@ -1532,16 +1532,13 @@ class Command(BaseCommand):
             }
         )
 
-        # Load access requirements
+        # Load access requirements - now using direct many-to-many relationship
         for access_data in data.get('access', []):
             access_req = self._load_access_requirements(access_data)
             if access_req:
-                AssetAccess.objects.get_or_create(
-                    asset=asset,
-                    access_requirement=access_req
-                )
+                asset.access_requirements.add(access_req)
 
-        # Load approaches
+        # Load approaches - now using direct many-to-many relationship
         for approach_data in data.get('approach', []):
             approach, _ = ApproachType.objects.get_or_create(
                 name=approach_data.get('name', ''),
@@ -1550,12 +1547,9 @@ class Command(BaseCommand):
                     'schema_key': approach_data.get('schemaKey', ''),
                 }
             )
-            AssetApproach.objects.get_or_create(
-                asset=asset,
-                approach=approach
-            )
+            asset.approaches.add(approach)
 
-        # Load measurement techniques
+        # Load measurement techniques - now using direct many-to-many relationship
         for technique_data in data.get('measurementTechnique', []):
             technique, _ = MeasurementTechniqueType.objects.get_or_create(
                 name=technique_data.get('name', ''),
@@ -1564,28 +1558,19 @@ class Command(BaseCommand):
                     'schema_key': technique_data.get('schemaKey', ''),
                 }
             )
-            AssetMeasurementTechnique.objects.get_or_create(
-                asset=asset,
-                measurement_technique=technique
-            )
+            asset.measurement_techniques.add(technique)
 
-        # Load participants (wasAttributedTo)
+        # Load participants (wasAttributedTo) - now using direct many-to-many relationship
         for participant_data in data.get('wasAttributedTo', []):
             participant = self._load_participant(participant_data)
             if participant:
-                AssetWasAttributedTo.objects.get_or_create(
-                    asset=asset,
-                    participant=participant
-                )
+                asset.participants.add(participant)
 
-        # Load activities that generated this asset
+        # Load activities that generated this asset - now using direct many-to-many relationship
         for activity_data in data.get('wasGeneratedBy', []):
             activity = self._load_activity(activity_data)
             if activity:
-                AssetWasGeneratedBy.objects.get_or_create(
-                    asset=asset,
-                    activity=activity
-                )
+                asset.activities.add(activity)
 
         # Load published by activity
         published_by_data = data.get('publishedBy')
@@ -1882,21 +1867,17 @@ class Command(BaseCommand):
                 }
             )
 
-            # Load associated software
+            # Load associated software - now using direct many-to-many relationship
             for software_data in data.get('wasAssociatedWith', []):
                 software, _ = Software.objects.get_or_create(
                     name=software_data.get('name', ''),
                     defaults={
                         'identifier': software_data.get('identifier', ''),
-                        'schema_key': software_data.get('schemaKey', ''),
                         'version': software_data.get('version', ''),
                         'url': software_data.get('url', ''),
                     }
                 )
-                ActivityAssociation.objects.get_or_create(
-                    activity=activity,
-                    software=software
-                )
+                activity.software.add(software)
 
             return activity
         except Exception as e:
