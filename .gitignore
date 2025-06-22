@@ -163,3 +163,13 @@ settings_local.py
 # Backup files
 *.bak
 staticfiles/
+
+# Database exports and backups
+database_backups/
+*_db_export_*.sql
+*_db_export_*.tar.gz
+railway_backup_*.json
+temp_fixture.json
+temp_restore.sql
+temp_auth.json
+temp_dandisets.json

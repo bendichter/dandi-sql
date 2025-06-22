@@ -199,11 +199,12 @@ def get_example_queries():
 FROM dandisets_dandiset d 
 JOIN dandisets_assetdandiset ad ON d.id = ad.dandiset_id 
 JOIN dandisets_asset a ON ad.asset_id = a.id 
-JOIN dandisets_assetwasattributedto awo ON a.id = awo.asset_id 
-JOIN dandisets_participant p ON awo.participant_id = p.id 
+JOIN dandisets_asset_participants ap ON a.id = ap.asset_id 
+JOIN dandisets_participant p ON ap.participant_id = p.id 
 JOIN dandisets_speciestype s ON p.species_id = s.id 
 GROUP BY s.name 
-ORDER BY dataset_count DESC"""
+ORDER BY dataset_count DESC
+LIMIT 20"""
         },
         {
             'name': 'Find datasets with many files',
