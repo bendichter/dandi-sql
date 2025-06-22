@@ -27,16 +27,19 @@ jobs:
       
       - name: Call DANDI sync endpoint
         run: |
-          FORCE_FULL=""
+          # Prepare the request data
           if [ "${{ github.event.inputs.force_full_sync }}" = "true" ]; then
-            FORCE_FULL="?force_full=true"
+            REQUEST_DATA='{"force_full": true}'
+          else
+            REQUEST_DATA='{"force_full": false}'
           fi
           
           response=$(curl -s -w "\n%{http_code}" \
             -X POST \
             -H "Authorization: Bearer ${{ secrets.SYNC_API_TOKEN }}" \
             -H "Content-Type: application/json" \
-            "${{ secrets.RAILWAY_APP_URL }}/api/sync/trigger/$FORCE_FULL")
+            -d "$REQUEST_DATA" \
+            "${{ secrets.RAILWAY_APP_URL }}/api/sync/trigger/")
           
           # Extract HTTP status code and response body
           http_code=$(echo "$response" | tail -n1)
