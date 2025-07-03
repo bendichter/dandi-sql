@@ -1,74 +1,74 @@
-name: Sync DANDI Data
+# name: Sync DANDI Data
 
-on:
-  schedule:
-    # Run daily at 2:00 AM UTC
-    - cron: '0 2 * * *'
+# on:
+#   schedule:
+#     # Run daily at 2:00 AM UTC
+#     - cron: '0 2 * * *'
   
-  # Allow manual triggering from GitHub Actions tab
-  workflow_dispatch:
-    inputs:
-      force_full_sync:
-        description: 'Force full sync (ignore last sync timestamp)'
-        required: false
-        default: 'false'
-        type: choice
-        options:
-          - 'false'
-          - 'true'
+#   # Allow manual triggering from GitHub Actions tab
+#   workflow_dispatch:
+#     inputs:
+#       force_full_sync:
+#         description: 'Force full sync (ignore last sync timestamp)'
+#         required: false
+#         default: 'false'
+#         type: choice
+#         options:
+#           - 'false'
+#           - 'true'
 
-jobs:
-  sync-dandi:
-    runs-on: ubuntu-latest
+# jobs:
+#   sync-dandi:
+#     runs-on: ubuntu-latest
     
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+#     steps:
+#       - name: Checkout repository
+#         uses: actions/checkout@v4
       
-      - name: Call DANDI sync endpoint
-        run: |
-          # Prepare the request data
-          if [ "${{ github.event.inputs.force_full_sync }}" = "true" ]; then
-            REQUEST_DATA='{"force_full": true}'
-          else
-            REQUEST_DATA='{"force_full": false}'
-          fi
+#       - name: Call DANDI sync endpoint
+#         run: |
+#           # Prepare the request data
+#           if [ "${{ github.event.inputs.force_full_sync }}" = "true" ]; then
+#             REQUEST_DATA='{"force_full": true}'
+#           else
+#             REQUEST_DATA='{"force_full": false}'
+#           fi
           
-          response=$(curl -s -w "\n%{http_code}" \
-            -X POST \
-            -H "Authorization: Bearer ${{ secrets.SYNC_API_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d "$REQUEST_DATA" \
-            "${{ secrets.RAILWAY_APP_URL }}/api/sync/trigger/")
+#           response=$(curl -s -w "\n%{http_code}" \
+#             -X POST \
+#             -H "Authorization: Bearer ${{ secrets.SYNC_API_TOKEN }}" \
+#             -H "Content-Type: application/json" \
+#             -d "$REQUEST_DATA" \
+#             "${{ secrets.RAILWAY_APP_URL }}/api/sync/trigger/")
           
-          # Extract HTTP status code and response body
-          http_code=$(echo "$response" | tail -n1)
-          response_body=$(echo "$response" | sed '$d')
+#           # Extract HTTP status code and response body
+#           http_code=$(echo "$response" | tail -n1)
+#           response_body=$(echo "$response" | sed '$d')
           
-          echo "HTTP Status: $http_code"
-          echo "Response: $response_body"
+#           echo "HTTP Status: $http_code"
+#           echo "Response: $response_body"
           
-          # Check if request was successful
-          if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
-            echo "✅ DANDI sync completed successfully"
-          else
-            echo "❌ DANDI sync failed with HTTP $http_code"
-            echo "$response_body"
-            exit 1
-          fi
+#           # Check if request was successful
+#           if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+#             echo "✅ DANDI sync completed successfully"
+#           else
+#             echo "❌ DANDI sync failed with HTTP $http_code"
+#             echo "$response_body"
+#             exit 1
+#           fi
       
-      - name: Upload sync logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: sync-logs
-          path: |
-            *.log
-            /tmp/*.log
-          retention-days: 7
+#       - name: Upload sync logs on failure
+#         if: failure()
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: sync-logs
+#           path: |
+#             *.log
+#             /tmp/*.log
+#           retention-days: 7
       
-      - name: Notify on failure
-        if: failure()
-        run: |
-          echo "::error::DANDI sync failed. Check the logs for details."
-          echo "You can manually trigger a sync from the Django admin interface at your Railway app URL."
+#       - name: Notify on failure
+#         if: failure()
+#         run: |
+#           echo "::error::DANDI sync failed. Check the logs for details."
+#           echo "You can manually trigger a sync from the Django admin interface at your Railway app URL."
