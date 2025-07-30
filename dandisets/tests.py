@@ -87,7 +87,7 @@ class BasicSearchAPITests(PublishedDandisetTestCase):
     
     def test_search_assets_by_variable_measured(self):
         """Test asset search by variable measured"""
-        response = self.client.get('/api/assets/search/', {
+        response = self.client.get('/api/assets/', {
             'variable_measured': ['ElectricalSeries']
         })
         self.assertEqual(response.status_code, 200)
@@ -103,7 +103,7 @@ class BasicSearchAPITests(PublishedDandisetTestCase):
             if dandisets:
                 dandiset_id = dandisets[0]['id']
                 
-                response = self.client.get('/api/assets/search/', {
+                response = self.client.get('/api/assets/', {
                     'dandiset_id': dandiset_id,
                     'limit': 10
                 })
@@ -198,8 +198,9 @@ class SqlQueryAPITests(PublishedDandisetTestCase):
         SELECT s.name as species, COUNT(DISTINCT d.id) as datasets
         FROM dandisets_speciestype s
         JOIN dandisets_participant p ON s.id = p.species_id
-        JOIN dandisets_assetwasattributedto awo ON p.id = awo.participant_id
-        JOIN dandisets_assetdandiset ad ON awo.asset_id = ad.asset_id
+        JOIN dandisets_asset_participants ap ON p.id = ap.participant_id
+        JOIN dandisets_asset a ON ap.asset_id = a.id
+        JOIN dandisets_assetdandiset ad ON a.id = ad.asset_id
         JOIN dandisets_dandiset d ON ad.dandiset_id = d.id
         WHERE d.is_latest = true
         GROUP BY s.id, s.name
@@ -394,14 +395,17 @@ class ModelTests(PublishedDandisetTestCase):
         asset = Asset.objects.create(
             dandi_asset_id="test_asset_id",
             identifier="test_asset",
-            path="test/path.nwb",
             content_size=1024,
             encoding_format="application/x-nwb",
             digest={"sha256": "abc123"}
         )
         
         # Test many-to-many relationship through AssetDandiset
-        asset_dandiset = AssetDandiset.objects.create(asset=asset, dandiset=dandiset)
+        asset_dandiset = AssetDandiset.objects.create(
+            asset=asset, 
+            dandiset=dandiset,
+            path="test/path.nwb"
+        )
         
         # Verify the relationship exists
         self.assertEqual(asset_dandiset.asset, asset)
@@ -429,8 +433,8 @@ class PerformanceTests(PublishedDandisetTestCase):
         FROM dandisets_dandiset d
         LEFT JOIN dandisets_assetdandiset ad ON d.id = ad.dandiset_id
         LEFT JOIN dandisets_asset a ON ad.asset_id = a.id
-        LEFT JOIN dandisets_assetwasattributedto awo ON a.id = awo.asset_id
-        LEFT JOIN dandisets_participant p ON awo.participant_id = p.id
+        LEFT JOIN dandisets_asset_participants ap ON a.id = ap.asset_id
+        LEFT JOIN dandisets_participant p ON ap.participant_id = p.id
         WHERE d.is_latest = true
         GROUP BY d.id, d.base_id, d.name
         HAVING COUNT(DISTINCT a.id) > 0

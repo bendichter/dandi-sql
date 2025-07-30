@@ -6,13 +6,18 @@
             <div class="asset-path">
                 <i class="fas fa-file-code text-muted me-1"></i>
                 <code class="text-break">
-                    {% with asset_dandiset=asset.asset_dandisets.first %}
-                        {% if asset_dandiset %}
-                            {{ asset_dandiset.path }}
-                        {% else %}
-                            No path available
-                        {% endif %}
-                    {% endwith %}
+                    {% if asset.current_dandiset_assets and asset.current_dandiset_assets.0.path %}
+                        {{ asset.current_dandiset_assets.0.path }}
+                    {% else %}
+                        {% with asset_dandiset=asset.asset_dandisets.first %}
+                            {% if asset_dandiset and asset_dandiset.path %}
+                                {{ asset_dandiset.path }}
+                            {% else %}
+                                <span class="text-muted">Asset ID: {{ asset.dandi_asset_id }}</span>
+                                <small class="text-warning ms-2">(Path data missing - needs migration)</small>
+                            {% endif %}
+                        {% endwith %}
+                    {% endif %}
                 </code>
             </div>
             

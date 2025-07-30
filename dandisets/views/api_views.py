@@ -50,10 +50,10 @@ def perform_dandiset_search(request_params) -> Dict[str, Any]:
                         if species_group['name'] == param:
                             species_ids.extend(species_group['all_ids'])
                             break
-                    else:
-                        species = SpeciesType.objects.filter(name=param).first()
-                        if species:
-                            species_ids.append(species.pk)
+                        else:
+                            species = SpeciesType.objects.filter(name=param).first()
+                            if species:
+                                species_ids.append(species.pk)
             except (ValueError, TypeError):
                 continue
         
@@ -83,7 +83,7 @@ def perform_dandiset_search(request_params) -> Dict[str, Any]:
         
         if anatomy_ids:
             dandisets = dandisets.filter(
-                about__anatomy__id__in=anatomy_ids
+                anatomy__id__in=anatomy_ids
             ).distinct()
             filters['anatomy'] = anatomy_params
     
@@ -153,7 +153,7 @@ def perform_dandiset_search(request_params) -> Dict[str, Any]:
         
         if sex_ids:
             dandisets = dandisets.filter(
-                assets__attributed_to__participant__sex__id__in=sex_ids
+                assets__participants__sex__id__in=sex_ids
             ).distinct()
             filters['sex'] = sex_params
     
@@ -339,7 +339,7 @@ def perform_dandiset_search(request_params) -> Dict[str, Any]:
                 continue
         
         if sex_ids:
-            asset_query &= Q(attributed_to__participant__sex__id__in=sex_ids)
+            asset_query &= Q(participants__sex__id__in=sex_ids)
             filters['asset_sex'] = asset_sex_params
             has_asset_filters = True
     
@@ -387,7 +387,7 @@ def perform_dandiset_search(request_params) -> Dict[str, Any]:
                 except (ValueError, TypeError):
                     continue
             if sex_ids:
-                non_file_format_filters.append(Q(attributed_to__participant__sex__id__in=sex_ids))
+                non_file_format_filters.append(Q(participants__sex__id__in=sex_ids))
         if asset_dandiset_id:
             if asset_dandiset_id.startswith('DANDI:'):
                 dandiset_number = asset_dandiset_id[6:]
@@ -538,8 +538,8 @@ def api_dandiset_assets(request: HttpRequest, dandiset_id: str) -> JsonResponse:
             
             if sex_ids:
                 # Filter assets by participant sex using the relationship:
-                # Asset → AssetWasAttributedTo → Participant → SexType
-                asset_query &= Q(attributed_to__participant__sex__id__in=sex_ids)
+                # Asset → Participant → SexType
+                asset_query &= Q(participants__sex__id__in=sex_ids)
                 has_asset_filters = True
         
         # Dandiset ID filter
@@ -559,11 +559,68 @@ def api_dandiset_assets(request: HttpRequest, dandiset_id: str) -> JsonResponse:
         all_assets = Asset.objects.filter(dandisets=dandiset)
         total_assets_count = all_assets.count()
         
-        # Get filtered assets for this dandiset
-        if has_asset_filters:
-            assets = all_assets.filter(asset_query).order_by('asset_dandisets__path')
+        # Get filtered assets for this dandiset with proper relationship loading
+        from django.db.models import Prefetch
+        from ..models import AssetDandiset
+        
+        # Create a prefetch that only loads the AssetDandiset for the current dandiset
+        asset_dandiset_prefetch = Prefetch(
+            'asset_dandisets',
+            queryset=AssetDandiset.objects.filter(dandiset=dandiset).select_related('dandiset'),
+            to_attr='current_dandiset_assets'
+        )
+        
+        # Handle ordering - only allow valid asset fields
+        order_by = request.GET.get('order_by', 'asset_dandisets__path')
+        valid_asset_order_fields = [
+            'asset_dandisets__path', '-asset_dandisets__path',
+            'content_size', '-content_size',
+            'date_modified', '-date_modified',
+            'encoding_format', '-encoding_format',
+            'dandi_asset_id', '-dandi_asset_id'
+        ]
+        
+        # Use default if invalid order_by is provided
+        if order_by not in valid_asset_order_fields:
+            order_by = 'asset_dandisets__path'
+        
+        # When ordering by path, we want to show assets with paths first, then those without
+        # Empty strings come first alphabetically, so we need to handle this specially
+        if order_by in ['asset_dandisets__path', '-asset_dandisets__path']:
+            # Order by: 1) whether path is empty (populated paths first), 2) then by path
+            from django.db.models import Case, When, Value, CharField
+            
+            if order_by == 'asset_dandisets__path':
+                # Ascending: populated paths first, then by path ascending
+                order_fields = [
+                    Case(
+                        When(asset_dandisets__path='', then=Value('zzz_empty')),
+                        When(asset_dandisets__path__isnull=True, then=Value('zzz_null')),
+                        default='asset_dandisets__path',
+                        output_field=CharField()
+                    )
+                ]
+            else:  # -asset_dandisets__path
+                # Descending: populated paths first, then by path descending
+                order_fields = [
+                    Case(
+                        When(asset_dandisets__path='', then=Value('zzz_empty')),
+                        When(asset_dandisets__path__isnull=True, then=Value('zzz_null')),
+                        default='asset_dandisets__path',
+                        output_field=CharField()
+                    ).desc()
+                ]
         else:
-            assets = all_assets.order_by('asset_dandisets__path')
+            order_fields = [order_by]
+        
+        if has_asset_filters:
+            assets = all_assets.filter(asset_query).prefetch_related(
+                asset_dandiset_prefetch
+            ).order_by(*order_fields)
+        else:
+            assets = all_assets.prefetch_related(
+                asset_dandiset_prefetch
+            ).order_by(*order_fields)
         
         # Pagination
         assets_per_page = 10
@@ -697,7 +754,7 @@ def api_asset_search(request: HttpRequest) -> JsonResponse:
                     continue
             
             if sex_ids:
-                assets = assets.filter(attributed_to__participant__sex__id__in=sex_ids)
+                assets = assets.filter(participants__sex__id__in=sex_ids)
                 filters['asset_sex'] = asset_sex_params
         
         # Dandiset ID filter

@@ -600,11 +600,11 @@ function buildCleanUrl(form) {
             const selectedOptions = Array.from(element.selectedOptions);
             selectedOptions.forEach(option => {
                 if (option.value) {
-                    // For file_format, use the actual value (MIME type), for others use display text
-                    if (element.name === 'file_format') {
-                        params.append(element.name, option.value);
-                    } else {
+                    // For variables_measured, use the display text, for others use the option value (ID)
+                    if (element.name === 'variables_measured') {
                         params.append(element.name, option.textContent.trim());
+                    } else {
+                        params.append(element.name, option.value);
                     }
                 }
             });
@@ -751,18 +751,32 @@ document.addEventListener('DOMContentLoaded', function() {
     // Handle form submission
     form.addEventListener('submit', function(e) {
         e.preventDefault(); // Prevent default form submission
+        
+        // Reset button appearance
+        const searchButton = document.querySelector('button[type="submit"]');
+        if (searchButton) {
+            searchButton.classList.remove('btn-warning');
+            searchButton.classList.add('btn-primary');
+            searchButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Searching...';
+        }
+        
         const cleanUrl = buildCleanUrl(form);
         window.location.href = cleanUrl;
     });
     
-    // Handle multi-select changes
+    // Handle multi-select changes - removed auto-submission to allow multiple selections
+    // Users will need to click the Search button to apply filters
+    
+    // Optionally add visual feedback when selections change
     selects.forEach(select => {
         select.addEventListener('change', function() {
-            // Add a small delay to allow multiple selections
-            setTimeout(() => {
-                const cleanUrl = buildCleanUrl(form);
-                window.location.href = cleanUrl;
-            }, 100);
+            // Add visual feedback that filters have changed
+            const searchButton = document.querySelector('button[type="submit"]');
+            if (searchButton && !searchButton.classList.contains('btn-warning')) {
+                searchButton.classList.remove('btn-primary');
+                searchButton.classList.add('btn-warning');
+                searchButton.innerHTML = '<i class="fas fa-search"></i> Apply Filters';
+            }
         });
     });
     

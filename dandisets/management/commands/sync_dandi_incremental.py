@@ -2,10 +2,17 @@ import json
 import re
 import time
 import requests
+import tempfile
+import subprocess
+import yaml
+import hashlib
+import os
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
 from django.core.management.base import BaseCommand
 from django.utils.dateparse import parse_datetime
+from django.utils import timezone as django_timezone
 from django.db import transaction, connections
 from django.db.models import Q
 from tqdm import tqdm
@@ -44,6 +51,8 @@ class Command(BaseCommand):
             'lindi_skipped': 0,
             'lindi_errors': 0,
             'errors': 0,
+            'cache_hits': 0,
+            'cache_misses': 0,
         }
         self.dry_run = False
         self.verbose = False
@@ -55,6 +64,90 @@ class Command(BaseCommand):
         # Cache for API dandisets to avoid multiple expensive API calls
         self._api_dandisets_cache = None
         self._api_dandisets_dict_cache = None
+        
+        # Set up YAML file caching
+        self.cache_dir = Path.home() / '.cache' / 'dandi-sql' / 'yaml-cache'
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.cache_ttl = 3600  # Cache TTL in seconds (1 hour)
+
+    def download_yaml_from_s3(self, dandiset_id, filename):
+        """Download YAML file from S3 using AWS CLI with caching"""
+        # Normalize dandiset ID (remove DANDI: prefix and ensure 6 digits)
+        normalized_id = self._normalize_dandiset_id(dandiset_id)
+        
+        # Generate cache key
+        cache_key = f"{normalized_id}_{filename}"
+        cache_hash = hashlib.md5(cache_key.encode()).hexdigest()
+        cache_file = self.cache_dir / f"{cache_hash}.yaml"
+        
+        # Check if cached file exists and is not expired
+        if cache_file.exists():
+            try:
+                file_age = time.time() - cache_file.stat().st_mtime
+                if file_age < self.cache_ttl:
+                    # Load from cache
+                    with open(cache_file, 'r') as f:
+                        yaml_content = yaml.safe_load(f)
+                    
+                    self.stats['cache_hits'] += 1
+                    if self.verbose:
+                        self.stdout.write(f"Loaded {filename} for dandiset {normalized_id} from cache")
+                    return yaml_content
+                else:
+                    # Cache expired, remove old file
+                    cache_file.unlink()
+                    if self.verbose:
+                        self.stdout.write(f"Cache expired for {filename} for dandiset {normalized_id}")
+            except Exception as e:
+                if self.verbose:
+                    self.stdout.write(f"Error reading cache for {filename}: {e}")
+                # Remove corrupted cache file
+                cache_file.unlink(missing_ok=True)
+        
+        # Download from S3
+        s3_url = f"s3://dandiarchive/dandisets/{normalized_id}/draft/{filename}"
+        self.stats['cache_misses'] += 1
+        
+        with tempfile.NamedTemporaryFile(mode='w+', suffix='.yaml', delete=False) as temp_file:
+            try:
+                # Use AWS CLI to download the file
+                result = subprocess.run([
+                    'aws', 's3', 'cp', 
+                    '--no-sign-request',
+                    s3_url,
+                    temp_file.name
+                ], capture_output=True, text=True, check=True)
+                
+                # Read and parse the YAML content
+                with open(temp_file.name, 'r') as f:
+                    yaml_content = yaml.safe_load(f)
+                
+                # Save to cache
+                try:
+                    with open(cache_file, 'w') as f:
+                        yaml.dump(yaml_content, f)
+                    if self.verbose:
+                        self.stdout.write(f"Cached {filename} for dandiset {normalized_id}")
+                except Exception as e:
+                    if self.verbose:
+                        self.stdout.write(f"Failed to cache {filename}: {e}")
+                
+                if self.verbose:
+                    self.stdout.write(f"Successfully downloaded {filename} for dandiset {normalized_id}")
+                
+                return yaml_content
+                
+            except subprocess.CalledProcessError as e:
+                if self.verbose:
+                    self.stdout.write(f"Failed to download {filename} for dandiset {normalized_id}: {e.stderr}")
+                return None
+            except yaml.YAMLError as e:
+                if self.verbose:
+                    self.stdout.write(f"Failed to parse YAML content from {filename} for dandiset {normalized_id}: {e}")
+                return None
+            finally:
+                # Clean up temp file
+                Path(temp_file.name).unlink(missing_ok=True)
 
     def normalize_uberon_identifier(self, identifier: Optional[str]) -> Optional[str]:
         """Normalize UBERON identifiers to standard format"""
@@ -72,6 +165,21 @@ class Command(BaseCommand):
             return f"CHEBI:{match.group(1)}"
             
         return identifier
+
+    def _parse_datetime_with_timezone(self, datetime_str):
+        """Parse datetime string and ensure it's timezone-aware"""
+        if not datetime_str:
+            return None
+        
+        parsed_dt = parse_datetime(datetime_str)
+        if not parsed_dt:
+            return None
+        
+        # If the datetime is naive (no timezone info), assume UTC
+        if django_timezone.is_naive(parsed_dt):
+            parsed_dt = django_timezone.make_aware(parsed_dt, timezone.utc)
+        
+        return parsed_dt
 
     def _normalize_dandiset_id(self, dandiset_id: Optional[str]) -> Optional[str]:
         """Normalize dandiset ID to standard 6-digit format"""
@@ -374,10 +482,10 @@ class Command(BaseCommand):
             return None
 
     def _sync_dandisets_and_assets(self, last_sync_time, options, sync_scope, sync_tracker=None):
-        """Unified sync method that iterates through dandisets and handles both metadata and assets"""
-        self.stdout.write("Fetching dandisets from DANDI API...")
+        """Unified sync method using REST API for change detection and AWS S3 for efficient metadata loading"""
+        self.stdout.write("Starting sync using REST API for change detection and AWS S3 for metadata...")
         
-        # Get dandisets from API
+        # Get dandisets from API to determine which need updating
         if options['dandiset_id']:
             # Sync specific dandiset - use direct API call
             dandiset_id = options['dandiset_id']
@@ -396,7 +504,7 @@ class Command(BaseCommand):
         else:
             api_dandisets = list(self.client.get_dandisets())
         
-        # Filter dandisets that need updating
+        # Filter dandisets that need updating using REST API modification dates
         dandisets_to_process = []
         
         def check_dandiset(api_dandiset):
@@ -407,7 +515,7 @@ class Command(BaseCommand):
         self._process_with_progress(
             api_dandisets,
             check_dandiset,
-            "Checking dandisets for updates",
+            "Checking dandisets for updates via REST API",
             unit="dandiset",
             postfix_func=lambda ds: {"current": ds.identifier}
         )
@@ -418,14 +526,69 @@ class Command(BaseCommand):
             self.stdout.write("No dandisets need updates")
             return
         
-        # Process each dandiset (both metadata and assets)
+        # Process each dandiset using AWS S3 for metadata download
         self._process_with_progress(
             dandisets_to_process,
-            lambda ds: self._process_dandiset_and_assets(ds, last_sync_time, options, sync_scope, sync_tracker),
-            "Processing dandisets and assets",
+            lambda ds: self._process_dandiset_and_assets_from_yaml(ds, last_sync_time, options, sync_scope, sync_tracker),
+            "Processing dandisets and assets using AWS S3",
             unit="dandiset",
             postfix_func=lambda ds: {"current": ds.identifier}
         )
+
+    def _process_dandiset_and_assets_from_yaml(self, api_dandiset, last_sync_time, options, sync_scope, sync_tracker=None):
+        """Process a single dandiset using YAML metadata from S3 instead of REST API metadata"""
+        try:
+            dandiset = None
+            # Extract dandiset ID for S3 access
+            dandiset_id = api_dandiset.identifier
+            if dandiset_id.startswith('DANDI:'):
+                dandiset_id = dandiset_id[6:]
+            
+            # Skip dandiset 000026
+            if dandiset_id == '000026':
+                if self.verbose:
+                    self.stdout.write(f"Skipping dandiset 000026 as requested")
+                return
+            
+            # Step 1: Update dandiset metadata using YAML from S3 (if not assets-only)
+            if sync_scope in ['full', 'dandisets']:
+                if self.dry_run:
+                    if self.verbose:
+                        self.stdout.write(f"Would update dandiset: {api_dandiset.identifier}")
+                    self.stats['dandisets_updated'] += 1
+                else:
+                    # Download dandiset YAML metadata from S3
+                    dandiset_data = self.download_yaml_from_s3(dandiset_id, 'dandiset.yaml')
+                    if dandiset_data:
+                        with transaction.atomic():
+                            dandiset = self._load_dandiset(dandiset_data, sync_tracker)
+                            self.stats['dandisets_updated'] += 1
+                            if self.verbose:
+                                self.stdout.write(f"Updated dandiset: {api_dandiset.identifier}")
+                    else:
+                        if self.verbose:
+                            self.stdout.write(f"Could not download dandiset YAML for {api_dandiset.identifier}")
+                        return
+            
+            # Step 2: Process assets using YAML from S3 (if not dandisets-only)
+            if sync_scope in ['full', 'assets'] and not options['dandisets_only']:
+                # Get local dandiset for asset relationships
+                if not dandiset:
+                    try:
+                        # Try to find existing dandiset by base_id
+                        normalized_id = self._normalize_dandiset_id(dandiset_id)
+                        dandiset = Dandiset.objects.get(base_id__endswith=normalized_id)
+                    except Dandiset.DoesNotExist:
+                        if self.verbose:
+                            self.stdout.write(f"Local dandiset not found for {api_dandiset.identifier}, skipping assets")
+                        return
+                
+                self._process_assets_for_dandiset_from_yaml(dandiset_id, dandiset, last_sync_time, options, sync_tracker)
+                
+        except Exception as e:
+            self.stats['errors'] += 1
+            if self.verbose:
+                self.stdout.write(f"Error processing dandiset {api_dandiset.identifier}: {e}")
 
     def _process_dandiset_and_assets(self, api_dandiset, last_sync_time, options, sync_scope, sync_tracker=None):
         """Process a single dandiset: update metadata and then process its assets"""
@@ -464,6 +627,67 @@ class Command(BaseCommand):
             self.stats['errors'] += 1
             if self.verbose:
                 self.stdout.write(f"Error processing dandiset {api_dandiset.identifier}: {e}")
+
+    def _process_assets_for_dandiset_from_yaml(self, dandiset_id, local_dandiset, last_sync_time, options, sync_tracker=None):
+        """Process assets for a specific dandiset using YAML metadata from S3"""
+        try:
+            # Download assets YAML metadata from S3
+            assets_data = self.download_yaml_from_s3(dandiset_id, 'assets.yaml')
+            if not assets_data:
+                if self.verbose:
+                    self.stdout.write(f"Could not download assets YAML for {dandiset_id}")
+                # Even if no YAML assets, check for deleted assets
+                self._check_for_deleted_assets_in_dandiset_from_yaml(local_dandiset, [], options)
+                return
+            
+            if not isinstance(assets_data, list):
+                if self.verbose:
+                    self.stdout.write(f"Invalid assets data format for {dandiset_id} - expected list, got {type(assets_data)}")
+                return
+            
+            if not assets_data:
+                if self.verbose:
+                    self.stdout.write(f"No assets found for {dandiset_id}")
+                # Check for deleted assets
+                self._check_for_deleted_assets_in_dandiset_from_yaml(local_dandiset, [], options)
+                return
+            
+            # Apply max assets limit
+            max_assets = options.get('max_assets', 2000)
+            if len(assets_data) > max_assets:
+                if self.verbose:
+                    self.stdout.write(f"Limiting assets for {dandiset_id} to {max_assets} (total: {len(assets_data)})")
+                assets_data = assets_data[:max_assets]
+            
+            # Process assets - filter and update in one pass
+            assets_updated = 0
+            
+            def process_asset(asset_data):
+                nonlocal assets_updated
+                if self._asset_needs_update_from_yaml(asset_data, last_sync_time):
+                    self._update_asset_from_yaml(asset_data, local_dandiset, sync_tracker)
+                    assets_updated += 1
+                self.stats['assets_checked'] += 1
+            
+            self._process_with_progress(
+                assets_data,
+                process_asset,
+                f"Processing assets for {dandiset_id}",
+                unit="asset",
+                postfix_func=lambda asset: {"asset": self._truncate_path(asset.get('path', 'unknown'))},
+                leave=False
+            )
+            
+            if self.verbose and assets_updated > 0:
+                self.stdout.write(f"Updated {assets_updated} assets for {dandiset_id}")
+            
+            # Check for deleted assets in this dandiset
+            self._check_for_deleted_assets_in_dandiset_from_yaml(local_dandiset, assets_data, options)
+                
+        except Exception as e:
+            self.stats['errors'] += 1
+            if self.verbose:
+                self.stdout.write(f"Error processing assets for {dandiset_id}: {e}")
 
     def _process_assets_for_dandiset(self, api_dandiset, local_dandiset, last_sync_time, options, sync_tracker=None):
         """Process assets for a specific dandiset"""
@@ -887,6 +1111,163 @@ class Command(BaseCommand):
                 asset_path = getattr(api_asset, 'path', 'unknown')
                 self.stdout.write(f"Error updating asset {asset_path}: {e}")
 
+    def _asset_needs_update_from_yaml(self, asset_data, last_sync_time):
+        """Check if an asset needs updating based on YAML data"""
+        if not last_sync_time:
+            return True
+        
+        try:
+            # Check modification dates from YAML
+            api_modified = parse_datetime(asset_data.get('dateModified'))
+            api_blob_modified = parse_datetime(asset_data.get('blobDateModified'))
+            
+            # Use the latest of the two dates
+            latest_api_date = None
+            if api_modified and api_blob_modified:
+                latest_api_date = max(api_modified, api_blob_modified)
+            elif api_modified:
+                latest_api_date = api_modified
+            elif api_blob_modified:
+                latest_api_date = api_blob_modified
+            
+            if not latest_api_date:
+                return True  # No date info, assume needs update
+            
+            # Check if we have this asset locally
+            asset_id = asset_data.get('identifier', '')
+            if not asset_id and asset_data.get('id'):
+                full_id = asset_data.get('id', '')
+                if ':' in full_id:
+                    asset_id = full_id.split(':', 1)[1]
+                else:
+                    asset_id = full_id
+            
+            try:
+                local_asset = Asset.objects.get(dandi_asset_id=asset_id)
+                
+                # Compare with local dates
+                local_modified = local_asset.date_modified
+                local_blob_modified = local_asset.blob_date_modified
+                
+                latest_local_date = None
+                if local_modified and local_blob_modified:
+                    latest_local_date = max(local_modified, local_blob_modified)
+                elif local_modified:
+                    latest_local_date = local_modified
+                elif local_blob_modified:
+                    latest_local_date = local_blob_modified
+                
+                if not latest_local_date:
+                    return True
+                
+                return latest_api_date > latest_local_date
+                
+            except Asset.DoesNotExist:
+                return True  # New asset
+                
+        except Exception as e:
+            if self.verbose:
+                self.stdout.write(f"Error checking asset from YAML: {e}")
+            return True  # Assume needs update on error
+
+    def _update_asset_from_yaml(self, asset_data, dandiset, sync_tracker=None):
+        """Update a single asset from YAML data"""
+        try:
+            if self.dry_run:
+                asset_path = asset_data.get('path', 'unknown')
+                if self.verbose:
+                    self.stdout.write(f"Would update asset: {asset_path}")
+                self.stats['assets_updated'] += 1
+                return
+            
+            with transaction.atomic():
+                asset = self._load_asset(asset_data, dandiset, sync_tracker)
+                self.stats['assets_updated'] += 1
+                
+                # After updating the asset, try to sync LINDI metadata if it's an NWB file
+                if not self.options.get('skip_lindi', False) and asset and asset.encoding_format == 'application/x-nwb':
+                    self._process_lindi_for_asset(asset, sync_tracker)
+                
+        except Exception as e:
+            self.stats['errors'] += 1
+            if self.verbose:
+                asset_path = asset_data.get('path', 'unknown')
+                self.stdout.write(f"Error updating asset {asset_path}: {e}")
+
+    def _check_for_deleted_assets_in_dandiset_from_yaml(self, local_dandiset, assets_data, options):
+        """Check for assets that exist locally but not in the YAML for this specific dandiset"""
+        try:
+            # Create set of asset IDs from YAML for fast lookup
+            yaml_asset_ids = set()
+            for asset_data in assets_data:
+                asset_id = asset_data.get('identifier', '')
+                if not asset_id and asset_data.get('id'):
+                    full_id = asset_data.get('id', '')
+                    if ':' in full_id:
+                        asset_id = full_id.split(':', 1)[1]
+                    else:
+                        asset_id = full_id
+                if asset_id:
+                    yaml_asset_ids.add(asset_id)
+            
+            # Get all local assets that belong to this dandiset
+            local_assets = local_dandiset.assets.all()
+            
+            assets_to_delete = []
+            
+            for local_asset in local_assets:
+                if local_asset.dandi_asset_id not in yaml_asset_ids:
+                    # Check if this asset belongs to other dandisets before adding to deletion list
+                    if local_asset.dandisets.count() == 1:
+                        # Asset only belongs to this dandiset - safe to delete completely
+                        assets_to_delete.append(('delete_asset', local_asset))
+                        if self.verbose:
+                            self.stdout.write(f"Asset {local_asset.dandi_asset_id} will be deleted (only belongs to {local_dandiset.base_id})")
+                    else:
+                        # Asset belongs to multiple dandisets - only remove the relationship
+                        assets_to_delete.append(('remove_relationship', local_asset))
+                        if self.verbose:
+                            self.stdout.write(f"Asset {local_asset.dandi_asset_id} relationship will be removed from {local_dandiset.base_id} (belongs to multiple dandisets)")
+            
+            if not assets_to_delete:
+                if self.verbose:
+                    self.stdout.write(f"No deleted assets found in dandiset {local_dandiset.base_id}")
+                return
+            
+            if self.verbose:
+                self.stdout.write(f"Found {len(assets_to_delete)} assets to process for deletion in dandiset {local_dandiset.base_id}")
+            
+            # Process the assets
+            for action, asset in assets_to_delete:
+                if self.dry_run:
+                    if action == 'delete_asset':
+                        if self.verbose:
+                            self.stdout.write(f"Would delete asset: {asset.path}")
+                    else:
+                        if self.verbose:
+                            self.stdout.write(f"Would remove relationship for asset: {asset.path}")
+                    self.stats['assets_deleted'] += 1
+                else:
+                    with transaction.atomic():
+                        if action == 'delete_asset':
+                            if self.verbose:
+                                self.stdout.write(f"Deleting asset: {asset.path}")
+                            asset.delete()
+                        else:
+                            if self.verbose:
+                                self.stdout.write(f"Removing relationship for asset: {asset.path}")
+                            AssetDandiset.objects.filter(
+                                asset=asset,
+                                dandiset=local_dandiset
+                            ).delete()
+                        
+                        self.stats['assets_deleted'] += 1
+                        
+        except Exception as e:
+            self.stats['errors'] += 1
+            if self.verbose:
+                self.stdout.write(f"Error checking for deleted assets in dandiset {local_dandiset.base_id}: {e}")
+
     def _sync_lindi_metadata_only(self, options, sync_tracker=None):
         """Sync LINDI metadata only for existing NWB assets without touching DANDI API data"""
         self.stdout.write("Starting LINDI-only metadata sync...")
@@ -1165,6 +1546,14 @@ class Command(BaseCommand):
         self.stdout.write(f"Assets updated: {self.stats['assets_updated']}")
         self.stdout.write(f"Assets deleted: {self.stats['assets_deleted']}")
         
+        # Show cache statistics
+        total_cache_requests = self.stats['cache_hits'] + self.stats['cache_misses']
+        if total_cache_requests > 0:
+            cache_hit_rate = (self.stats['cache_hits'] / total_cache_requests) * 100
+            self.stdout.write(f"YAML cache hits: {self.stats['cache_hits']}")
+            self.stdout.write(f"YAML cache misses: {self.stats['cache_misses']}")
+            self.stdout.write(f"YAML cache hit rate: {cache_hit_rate:.1f}%")
+        
         # Show LINDI statistics only if LINDI processing was enabled
         if not self.options.get('skip_lindi', False):
             self.stdout.write(f"LINDI metadata processed: {self.stats['lindi_processed']}")
@@ -1370,7 +1759,6 @@ class Command(BaseCommand):
                 'is_draft': is_draft,
                 'is_latest': True,  # Assume each loaded version is latest for now
                 'citation': data.get('citation', ''),
-                'schema_key': data.get('schemaKey', ''),
                 'schema_version': data.get('schemaVersion', ''),
                 'repository': data.get('repository', ''),
                 'date_created': parse_datetime(data.get('dateCreated')) if data.get('dateCreated') else None,
@@ -1498,11 +1886,10 @@ class Command(BaseCommand):
                 'identifier': asset_id,
                 'content_size': data.get('contentSize', 0),
                 'encoding_format': data.get('encodingFormat', ''),
-                'schema_key': data.get('schemaKey', 'Asset'),
                 'schema_version': data.get('schemaVersion', '0.6.7'),
-                'date_modified': parse_datetime(data.get('dateModified')) if data.get('dateModified') else None,
-                'date_published': parse_datetime(data.get('datePublished')) if data.get('datePublished') else None,
-                'blob_date_modified': parse_datetime(data.get('blobDateModified')) if data.get('blobDateModified') else None,
+                'date_modified': self._parse_datetime_with_timezone(data.get('dateModified')),
+                'date_published': self._parse_datetime_with_timezone(data.get('datePublished')),
+                'blob_date_modified': self._parse_datetime_with_timezone(data.get('blobDateModified')),
                 'digest': data.get('digest', {}),
                 'content_url': data.get('contentUrl', []),
                 'variable_measured': data.get('variableMeasured', []),
@@ -1544,7 +1931,6 @@ class Command(BaseCommand):
                 name=approach_data.get('name', ''),
                 defaults={
                     'identifier': approach_data.get('identifier', ''),
-                    'schema_key': approach_data.get('schemaKey', ''),
                 }
             )
             asset.approaches.add(approach)
@@ -1555,7 +1941,6 @@ class Command(BaseCommand):
                 name=technique_data.get('name', ''),
                 defaults={
                     'identifier': technique_data.get('identifier', ''),
-                    'schema_key': technique_data.get('schemaKey', ''),
                 }
             )
             asset.measurement_techniques.add(technique)
@@ -1624,7 +2009,7 @@ class Command(BaseCommand):
                     defaults={
                         'email': email,
                         'identifier': identifier,
-                        'schema_key': data.get('schemaKey', ''),
+                        'schema_key': data.get('schemaKey', 'Contributor'),
                         'award_number': data.get('awardNumber', ''),
                         'url': data.get('url', ''),
                     }
@@ -1661,7 +2046,6 @@ class Command(BaseCommand):
                     name=affiliation_data.get('name', ''),
                     defaults={
                         'identifier': affiliation_data.get('identifier', ''),
-                        'schema_key': affiliation_data.get('schemaKey', ''),
                     }
                 )
                 ContributorAffiliation.objects.get_or_create(
@@ -1739,15 +2123,14 @@ class Command(BaseCommand):
                     email=contact_point_data.get('email', ''),
                     defaults={
                         'url': contact_point_data.get('url', ''),
-                        'schema_key': contact_point_data.get('schemaKey', ''),
                     }
                 )
 
             access_req, _ = AccessRequirements.objects.get_or_create(
                 status=data.get('status', ''),
                 defaults={
-                    'schema_key': data.get('schemaKey', ''),
                     'contact_point': contact_point,
+                    'description': data.get('description', ''),
                     'embargoed_until': parse_datetime(data.get('embargoedUntil')) if data.get('embargoedUntil') else None,
                 }
             )
@@ -1765,7 +2148,6 @@ class Command(BaseCommand):
                 defaults={
                     'name': data.get('name', ''),
                     'relation': data.get('relation', ''),
-                    'schema_key': data.get('schemaKey', ''),
                     'identifier': data.get('identifier', ''),
                     'repository': data.get('repository', ''),
                     'resource_type': data.get('resourceType', ''),
@@ -1782,7 +2164,6 @@ class Command(BaseCommand):
         try:
             # Create a new AssetsSummary for each dandiset
             assets_summary = AssetsSummary.objects.create(
-                schema_key=data.get('schemaKey', ''),
                 number_of_bytes=data.get('numberOfBytes', 0),
                 number_of_files=data.get('numberOfFiles', 0),
                 number_of_subjects=data.get('numberOfSubjects', 0),
@@ -1797,7 +2178,6 @@ class Command(BaseCommand):
                     name=species_data.get('name', ''),
                     defaults={
                         'identifier': species_data.get('identifier', ''),
-                        'schema_key': species_data.get('schemaKey', ''),
                     }
                 )
                 AssetsSummarySpecies.objects.get_or_create(
@@ -1811,7 +2191,6 @@ class Command(BaseCommand):
                     name=approach_data.get('name', ''),
                     defaults={
                         'identifier': approach_data.get('identifier', ''),
-                        'schema_key': approach_data.get('schemaKey', ''),
                     }
                 )
                 AssetsSummaryApproach.objects.get_or_create(
@@ -1825,7 +2204,6 @@ class Command(BaseCommand):
                     name=technique_data.get('name', ''),
                     defaults={
                         'identifier': technique_data.get('identifier', ''),
-                        'schema_key': technique_data.get('schemaKey', ''),
                     }
                 )
                 AssetsSummaryMeasurementTechnique.objects.get_or_create(
@@ -1839,7 +2217,6 @@ class Command(BaseCommand):
                     name=standard_data.get('name', ''),
                     defaults={
                         'identifier': standard_data.get('identifier', ''),
-                        'schema_key': standard_data.get('schemaKey', ''),
                     }
                 )
                 AssetsSummaryDataStandard.objects.get_or_create(
@@ -1896,7 +2273,6 @@ class Command(BaseCommand):
                     name=species_data.get('name', ''),
                     defaults={
                         'identifier': species_data.get('identifier', ''),
-                        'schema_key': species_data.get('schemaKey', ''),
                     }
                 )
 
@@ -1908,7 +2284,6 @@ class Command(BaseCommand):
                     name=sex_data.get('name', ''),
                     defaults={
                         'identifier': sex_data.get('identifier', ''),
-                        'schema_key': sex_data.get('schemaKey', ''),
                     }
                 )
 
@@ -1918,7 +2293,6 @@ class Command(BaseCommand):
                     'species': species,
                     'sex': sex,
                     'age': data.get('age'),
-                    'schema_key': data.get('schemaKey', 'Participant'),
                 }
             )
             return participant
