@@ -9,12 +9,12 @@ import hashlib
 import os
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Optional
-from django.core.management.base import BaseCommand
+from typing import Optional, Dict, Any, List, Union, Tuple, Set, Callable, Iterable
+from django.core.management.base import BaseCommand, CommandParser
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone as django_timezone
 from django.db import transaction, connections
-from django.db.models import Q
+from django.db.models import Q, QuerySet
 from tqdm import tqdm
 from dandi.dandiapi import DandiAPIClient
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -33,9 +33,30 @@ from dandisets.models import (
 
 
 class Command(BaseCommand):
+    """
+    Django management command for incrementally syncing DANDI metadata.
+    
+    This command synchronizes dandisets and assets from the DANDI API, only updating
+    changed items based on modification timestamps. It supports various sync modes
+    including full sync, dandisets-only, assets-only, and LINDI metadata sync.
+    
+    Features:
+    - Incremental sync based on last modification times
+    - YAML file caching for improved performance
+    - LINDI metadata processing for NWB files
+    - Parallel processing support
+    - Comprehensive error handling and progress tracking
+    """
     help = 'Incrementally sync DANDI metadata - only updates changed dandisets and assets'
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """
+        Initialize the Command with default settings and statistics tracking.
+        
+        Args:
+            *args: Variable length argument list passed to parent class
+            **kwargs: Arbitrary keyword arguments passed to parent class
+        """
         super().__init__(*args, **kwargs)
         self.client = DandiAPIClient()
         self.stats = {
@@ -70,8 +91,25 @@ class Command(BaseCommand):
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.cache_ttl = 3600  # Cache TTL in seconds (1 hour)
 
-    def download_yaml_from_s3(self, dandiset_id, filename):
-        """Download YAML file from S3 using AWS CLI with caching"""
+    def download_yaml_from_s3(self, dandiset_id: str, filename: str) -> Optional[Dict[str, Any]]:
+        """
+        Download YAML file from S3 using AWS CLI with caching support.
+        
+        This method downloads YAML files from the DANDI S3 bucket using the AWS CLI.
+        It implements a local file cache with TTL to avoid repeated downloads of the
+        same files within the cache window.
+        
+        Args:
+            dandiset_id: The DANDI dataset identifier (e.g., "000003" or "DANDI:000003")
+            filename: The YAML filename to download (e.g., "dandiset.yaml", "assets.yaml")
+            
+        Returns:
+            Dictionary containing the parsed YAML content, or None if download/parsing failed
+            
+        Note:
+            Uses MD5 hash of the cache key for filename to avoid filesystem issues.
+            Automatically handles cache expiration based on self.cache_ttl.
+        """
         # Normalize dandiset ID (remove DANDI: prefix and ensure 6 digits)
         normalized_id = self._normalize_dandiset_id(dandiset_id)
         
@@ -150,7 +188,27 @@ class Command(BaseCommand):
                 Path(temp_file.name).unlink(missing_ok=True)
 
     def normalize_uberon_identifier(self, identifier: Optional[str]) -> Optional[str]:
-        """Normalize UBERON identifiers to standard format"""
+        """
+        Normalize UBERON identifiers to standard format.
+
+        Parameters
+        ----------
+        identifier : Optional[str]
+            Raw identifier that may be in URL or other format
+
+        Returns
+        -------
+        Optional[str]
+            Normalized identifier in standard format (e.g., "UBERON:123456")
+            or None if input was None
+
+        Examples
+        --------
+        >>> cmd.normalize_uberon_identifier("http://purl.obolibrary.org/obo/UBERON_0000955")
+        "UBERON:0000955"
+        >>> cmd.normalize_uberon_identifier("http://purl.obolibrary.org/obo/CHEBI_123456")
+        "CHEBI:123456"
+        """
         if not identifier:
             return identifier
             
@@ -166,8 +224,22 @@ class Command(BaseCommand):
             
         return identifier
 
-    def _parse_datetime_with_timezone(self, datetime_str):
-        """Parse datetime string and ensure it's timezone-aware"""
+    def _parse_datetime_with_timezone(self, datetime_str: Optional[str]) -> Optional[datetime]:
+        """
+        Parse datetime string and ensure it's timezone-aware.
+        
+        Converts naive datetime objects to timezone-aware ones by assuming UTC
+        if no timezone information is present.
+        
+        Args:
+            datetime_str: ISO format datetime string or None
+            
+        Returns:
+            Timezone-aware datetime object or None if parsing fails
+            
+        Note:
+            Uses Django's timezone utilities to handle timezone conversion safely.
+        """
         if not datetime_str:
             return None
         
@@ -193,7 +265,7 @@ class Command(BaseCommand):
         # Pad with zeros if needed (e.g., 3 -> 000003)
         return dandiset_id.zfill(6)
 
-    def _get_api_dandisets(self):
+    def _get_api_dandisets(self) -> List[Any]:
         """Get all dandisets from API with caching to avoid multiple expensive calls"""
         if self._api_dandisets_cache is None:
             if self.verbose:
@@ -201,23 +273,70 @@ class Command(BaseCommand):
             self._api_dandisets_cache = list(self.client.get_dandisets())
         return self._api_dandisets_cache
 
-    def _get_api_dandisets_dict(self):
+    def _get_api_dandisets_dict(self) -> Dict[str, Any]:
         """Get API dandisets as a dictionary keyed by identifier for fast lookup"""
         if self._api_dandisets_dict_cache is None:
             api_dandisets = self._get_api_dandisets()
             self._api_dandisets_dict_cache = {ds.identifier: ds for ds in api_dandisets}
         return self._api_dandisets_dict_cache
 
-    def _process_with_progress(self, items, process_func, description, unit="item", postfix_func=None, leave=True):
-        """Generic function to process items with optional progress bar
+    def _process_with_progress(
+        self, 
+        items: Iterable[Any], 
+        process_func: Callable[[Any], None], 
+        description: str, 
+        unit: str = "item", 
+        postfix_func: Optional[Callable[[Any], Dict[str, Any]]] = None, 
+        leave: bool = True
+    ) -> None:
+        """
+        Generic function to process items with optional progress bar support.
         
-        Args:
-            items: Iterable of items to process
-            process_func: Function to call for each item
-            description: Description for progress bar
-            unit: Unit name for progress bar
-            postfix_func: Optional function that takes an item and returns dict for postfix display
-            leave: Whether to leave progress bar after completion
+        This method provides a consistent way to process collections of items
+        with optional progress tracking using tqdm. It handles both progress
+        and no-progress modes based on the command settings.
+
+        Parameters
+        ----------
+        items : Iterable[Any]
+            Iterable collection of items to process sequentially
+        process_func : Callable[[Any], None]
+            Function to call for each item. Should accept one argument (the item)
+            and return None. This function performs the actual processing work.
+        description : str
+            Description text displayed in the progress bar
+        unit : str, default="item"
+            Unit name for progress bar display (e.g., "item", "dandiset", "asset")
+        postfix_func : Optional[Callable[[Any], Dict[str, Any]]], default=None
+            Optional function that takes an item and returns a dictionary
+            for postfix display in the progress bar. Used to show current
+            item information during processing.
+        leave : bool, default=True
+            Whether to leave progress bar visible after completion
+            
+        Returns
+        -------
+        None
+            This method processes items in-place and returns nothing
+            
+        Notes
+        -----
+        The method behavior depends on the `self.no_progress` setting:
+        - When `no_progress=True`: Items are processed sequentially without 
+          any visual progress indication
+        - When `no_progress=False`: Uses tqdm to display a progress bar with
+          optional postfix updates showing current item information
+          
+        Examples
+        --------
+        >>> # Process dandisets with progress tracking
+        >>> self._process_with_progress(
+        ...     dandisets,
+        ...     self._update_dandiset,
+        ...     "Updating dandisets",
+        ...     unit="dandiset", 
+        ...     postfix_func=lambda ds: {"current": ds.identifier}
+        ... )
         """
         if self.no_progress:
             for item in items:
@@ -229,14 +348,52 @@ class Command(BaseCommand):
                         pbar.set_postfix(**postfix_func(item))
                     process_func(item)
 
-    def _truncate_path(self, path, max_length=30):
-        """Truncate a file path for display"""
+    def _truncate_path(self, path: Optional[str], max_length: int = 30) -> str:
+        """
+        Truncate a file path for display purposes.
+
+        Parameters
+        ----------
+        path : Optional[str]
+            File path to truncate, may be None
+        max_length : int, default=30
+            Maximum allowed length before truncation
+
+        Returns
+        -------
+        str
+            Truncated path string with ellipsis if needed, or 'unknown' if path is None
+
+        Examples
+        --------
+        >>> cmd._truncate_path("/very/long/path/to/file.txt")
+        "/very/long/path/to/file..."
+        >>> cmd._truncate_path(None)
+        "unknown"
+        """
         if not path:
             return 'unknown'
         return path[:max_length] + '...' if len(path) > max_length else path
 
-    def _asset_has_lindi_metadata(self, asset):
-        """Check if an asset already has LINDI metadata"""
+    def _asset_has_lindi_metadata(self, asset: 'Asset') -> bool:
+        """
+        Check if an asset already has LINDI metadata in the database.
+
+        Parameters
+        ----------
+        asset : Asset
+            Asset model instance to check for existing LINDI metadata
+
+        Returns
+        -------
+        bool
+            True if the asset has LINDI metadata, False otherwise
+
+        Notes
+        -----
+        Uses a try/except pattern to handle the DoesNotExist case efficiently
+        rather than checking existence first then querying.
+        """
         try:
             LindiMetadata.objects.get(asset=asset)
             return True
@@ -535,8 +692,75 @@ class Command(BaseCommand):
             postfix_func=lambda ds: {"current": ds.identifier}
         )
 
-    def _process_dandiset_and_assets_from_yaml(self, api_dandiset, last_sync_time, options, sync_scope, sync_tracker=None):
-        """Process a single dandiset using YAML metadata from S3 instead of REST API metadata"""
+    def _process_dandiset_and_assets_from_yaml(
+        self, 
+        api_dandiset: Any, 
+        last_sync_time: Optional[datetime], 
+        options: Dict[str, Any], 
+        sync_scope: str, 
+        sync_tracker: Optional['SyncTracker'] = None
+    ) -> None:
+        """
+        Process a single dandiset using YAML metadata from S3 instead of REST API metadata.
+        
+        This method implements the unified sync approach by downloading YAML files from S3
+        for both dandiset metadata and assets instead of using the slower REST API.
+        It processes both dandiset metadata updates and asset processing in a single pass.
+
+        Parameters
+        ----------
+        api_dandiset : Any
+            DANDI API dandiset object used to extract the dandiset identifier
+            and basic information for S3 access
+        last_sync_time : Optional[datetime]
+            Timestamp of the last successful sync. Used to determine if assets
+            need updating. If None, all items are considered for update.
+        options : Dict[str, Any]
+            Command line options dictionary containing sync configuration such as:
+            - 'dandisets_only': bool - skip asset processing if True
+            - 'max_assets': int - maximum number of assets to process
+            - 'verbose': bool - enable detailed logging
+        sync_scope : str
+            Scope of the current sync operation. One of:
+            - 'full': sync both dandisets and assets
+            - 'dandisets': sync only dandiset metadata
+            - 'assets': sync only assets
+        sync_tracker : Optional[SyncTracker], default=None
+            Database object to track sync operations and associate with
+            created/updated records for audit purposes
+            
+        Returns
+        -------
+        None
+            This method performs database operations in-place and returns nothing
+            
+        Notes
+        -----
+        This method implements a two-step process:
+        1. **Dandiset metadata sync**: Downloads `dandiset.yaml` from S3 and updates
+           the local dandiset record (if sync_scope allows)
+        2. **Assets processing**: Downloads `assets.yaml` from S3 and processes all
+           asset metadata (if sync_scope allows)
+           
+        The method automatically skips dandiset 000026 as requested and handles
+        cases where YAML files are not available in S3. It uses database transactions
+        to ensure data consistency and includes comprehensive error handling.
+        
+        The S3 approach is significantly faster than the REST API for bulk metadata
+        operations since it downloads pre-computed YAML files rather than making
+        individual API calls for each item.
+        
+        Examples
+        --------
+        >>> # Process a specific dandiset with full sync scope
+        >>> self._process_dandiset_and_assets_from_yaml(
+        ...     api_dandiset=some_api_dandiset,
+        ...     last_sync_time=datetime.now(timezone.utc),
+        ...     options={'verbose': True, 'max_assets': 1000},
+        ...     sync_scope='full',
+        ...     sync_tracker=tracker_instance
+        ... )
+        """
         try:
             dandiset = None
             # Extract dandiset ID for S3 access
@@ -590,8 +814,74 @@ class Command(BaseCommand):
             if self.verbose:
                 self.stdout.write(f"Error processing dandiset {api_dandiset.identifier}: {e}")
 
-    def _process_dandiset_and_assets(self, api_dandiset, last_sync_time, options, sync_scope, sync_tracker=None):
-        """Process a single dandiset: update metadata and then process its assets"""
+    def _process_dandiset_and_assets(
+        self, 
+        api_dandiset: Any, 
+        last_sync_time: Optional[datetime], 
+        options: Dict[str, Any], 
+        sync_scope: str, 
+        sync_tracker: Optional['SyncTracker'] = None
+    ) -> None:
+        """
+        Process a single dandiset by updating metadata and then processing its assets.
+        
+        This method implements the traditional sync approach using the DANDI REST API
+        for both dandiset metadata and asset information. It processes both dandiset
+        metadata updates and asset processing in a sequential two-step process.
+
+        Parameters
+        ----------
+        api_dandiset : Any
+            DANDI API dandiset object that provides access to both metadata
+            and assets through the REST API interface
+        last_sync_time : Optional[datetime]
+            Timestamp of the last successful sync. Used to determine if assets
+            need updating. If None, all items are considered for update.
+        options : Dict[str, Any]
+            Command line options dictionary containing sync configuration such as:
+            - 'dandisets_only': bool - skip asset processing if True
+            - 'max_assets': int - maximum number of assets to process
+            - 'verbose': bool - enable detailed logging
+        sync_scope : str
+            Scope of the current sync operation. One of:
+            - 'full': sync both dandisets and assets
+            - 'dandisets': sync only dandiset metadata
+            - 'assets': sync only assets
+        sync_tracker : Optional[SyncTracker], default=None
+            Database object to track sync operations and associate with
+            created/updated records for audit purposes
+            
+        Returns
+        -------
+        None
+            This method performs database operations in-place and returns nothing
+            
+        Notes
+        -----
+        This method implements a two-step process using the DANDI REST API:
+        1. **Dandiset metadata sync**: Calls `api_dandiset.get_raw_metadata()` to
+           retrieve metadata and updates the local dandiset record (if sync_scope allows)
+        2. **Assets processing**: Calls `api_dandiset.get_assets()` to retrieve asset
+           list and processes each asset individually (if sync_scope allows)
+           
+        This approach is more traditional but slower than the S3-based YAML approach
+        since it makes individual REST API calls for metadata rather than downloading
+        pre-computed files. It provides more real-time data but with higher latency.
+        
+        The method includes comprehensive error handling and uses database transactions
+        to ensure data consistency during the sync process.
+        
+        Examples
+        --------
+        >>> # Process a specific dandiset with full sync scope using REST API
+        >>> self._process_dandiset_and_assets(
+        ...     api_dandiset=some_api_dandiset,
+        ...     last_sync_time=datetime.now(timezone.utc),
+        ...     options={'verbose': True, 'max_assets': 1000},
+        ...     sync_scope='full',
+        ...     sync_tracker=tracker_instance
+        ... )
+        """
         try:
             dandiset = None
             
@@ -628,8 +918,84 @@ class Command(BaseCommand):
             if self.verbose:
                 self.stdout.write(f"Error processing dandiset {api_dandiset.identifier}: {e}")
 
-    def _process_assets_for_dandiset_from_yaml(self, dandiset_id, local_dandiset, last_sync_time, options, sync_tracker=None):
-        """Process assets for a specific dandiset using YAML metadata from S3"""
+    def _process_assets_for_dandiset_from_yaml(
+        self, 
+        dandiset_id: str, 
+        local_dandiset: 'Dandiset', 
+        last_sync_time: Optional[datetime], 
+        options: Dict[str, Any], 
+        sync_tracker: Optional['SyncTracker'] = None
+    ) -> None:
+        """
+        Process assets for a specific dandiset using YAML metadata downloaded from S3.
+        
+        This method downloads the assets.yaml file from S3 for a given dandiset and
+        processes all asset metadata in bulk. It includes asset summary validation,
+        asset filtering based on modification times, and deletion detection for
+        assets that no longer exist in the YAML but are present locally.
+
+        Parameters
+        ----------
+        dandiset_id : str
+            The normalized dandiset identifier (6-digit format, e.g., "000003")
+            used to construct the S3 path for downloading assets.yaml
+        local_dandiset : Dandiset
+            Local database dandiset object that assets will be associated with.
+            Used for creating asset-dandiset relationships and summary updates.
+        last_sync_time : Optional[datetime]
+            Timestamp of the last successful sync. Assets modified after this
+            time will be updated. If None, all assets are considered for update.
+        options : Dict[str, Any]
+            Command line options dictionary containing sync configuration such as:
+            - 'max_assets': int - maximum number of assets to process
+            - 'verbose': bool - enable detailed logging
+            - 'dry_run': bool - preview mode without making changes
+        sync_tracker : Optional[SyncTracker], default=None
+            Database object to track sync operations and associate with
+            created/updated records for audit purposes
+            
+        Returns
+        -------
+        None
+            This method performs database operations in-place and returns nothing
+            
+        Notes
+        -----
+        This method implements a comprehensive asset processing workflow:
+        
+        1. **YAML Download**: Downloads `assets.yaml` from S3 using the normalized
+           dandiset ID to construct the S3 path
+        2. **Data Validation**: Validates that the downloaded data is a proper list
+           and handles cases where no assets are found
+        3. **Summary Calculation**: Computes total bytes, file count, and unique
+           subjects from the asset data to validate/update the dandiset summary
+        4. **Asset Limiting**: Applies the max_assets limit to prevent processing
+           too many assets in a single operation
+        5. **Bulk Processing**: Processes all assets using progress tracking,
+           filtering by modification time and updating asset metadata
+        6. **Deletion Detection**: Identifies and handles assets that exist locally
+           but are no longer present in the YAML file
+           
+        The method handles both complete asset deletion (for assets that only belong
+        to this dandiset) and relationship removal (for assets shared across
+        multiple dandisets). It includes comprehensive error handling and uses
+        database transactions where appropriate.
+        
+        The S3-based approach is significantly faster than processing assets
+        individually via the REST API since it downloads pre-computed metadata
+        in a single operation.
+        
+        Examples
+        --------
+        >>> # Process assets for dandiset 000003 using S3 YAML
+        >>> self._process_assets_for_dandiset_from_yaml(
+        ...     dandiset_id="000003",
+        ...     local_dandiset=dandiset_instance,
+        ...     last_sync_time=datetime.now(timezone.utc),
+        ...     options={'max_assets': 1000, 'verbose': True},
+        ...     sync_tracker=tracker_instance
+        ... )
+        """
         try:
             # Download assets YAML metadata from S3
             assets_data = self.download_yaml_from_s3(dandiset_id, 'assets.yaml')
@@ -651,6 +1017,42 @@ class Command(BaseCommand):
                 # Check for deleted assets
                 self._check_for_deleted_assets_in_dandiset_from_yaml(local_dandiset, [], options)
                 return
+            
+            # Calculate correct summary data from assets before processing
+            total_bytes = 0
+            total_files = len(assets_data)
+            unique_subjects = set()
+            
+            for asset_data in assets_data:
+                # Sum up content sizes
+                content_size = asset_data.get('contentSize', 0)
+                if isinstance(content_size, (int, float)):
+                    total_bytes += content_size
+                
+                # Collect unique subjects from participants
+                for participant_data in asset_data.get('wasAttributedTo', []):
+                    participant_id = participant_data.get('identifier')
+                    if participant_id:
+                        unique_subjects.add(participant_id)
+            
+            # Update the dandiset's assets summary with calculated values if it looks wrong
+            if (local_dandiset.assets_summary and 
+                local_dandiset.assets_summary.number_of_files == 0 and 
+                total_files > 0):
+                
+                if self.verbose:
+                    self.stdout.write(f"Updating assets summary for {dandiset_id} - "
+                                    f"calculated {total_files} files, {total_bytes} bytes from assets.yaml")
+                
+                local_dandiset.assets_summary.number_of_files = total_files
+                local_dandiset.assets_summary.number_of_bytes = total_bytes
+                if unique_subjects:
+                    local_dandiset.assets_summary.number_of_subjects = len(unique_subjects)
+                elif local_dandiset.assets_summary.number_of_subjects == 0:
+                    local_dandiset.assets_summary.number_of_subjects = None
+                
+                if not self.dry_run:
+                    local_dandiset.assets_summary.save()
             
             # Apply max assets limit
             max_assets = options.get('max_assets', 2000)
@@ -689,8 +1091,83 @@ class Command(BaseCommand):
             if self.verbose:
                 self.stdout.write(f"Error processing assets for {dandiset_id}: {e}")
 
-    def _process_assets_for_dandiset(self, api_dandiset, local_dandiset, last_sync_time, options, sync_tracker=None):
-        """Process assets for a specific dandiset"""
+    def _process_assets_for_dandiset(
+        self, 
+        api_dandiset: Any, 
+        local_dandiset: 'Dandiset', 
+        last_sync_time: Optional[datetime], 
+        options: Dict[str, Any], 
+        sync_tracker: Optional['SyncTracker'] = None
+    ) -> None:
+        """
+        Process assets for a specific dandiset using the traditional DANDI REST API.
+        
+        This method retrieves asset metadata directly from the DANDI REST API for
+        a given dandiset and processes each asset individually. It includes asset
+        filtering based on modification times, asset limiting, and deletion detection
+        for assets that no longer exist in the API but are present locally.
+
+        Parameters
+        ----------
+        api_dandiset : Any
+            DANDI API dandiset object that provides access to assets through
+            the `get_assets()` method. Used to retrieve live asset data from API.
+        local_dandiset : Dandiset
+            Local database dandiset object that assets will be associated with.
+            Used for creating asset-dandiset relationships and deletion detection.
+        last_sync_time : Optional[datetime]
+            Timestamp of the last successful sync. Assets modified after this
+            time will be updated. If None, all assets are considered for update.
+        options : Dict[str, Any]
+            Command line options dictionary containing sync configuration such as:
+            - 'max_assets': int - maximum number of assets to process
+            - 'verbose': bool - enable detailed logging
+            - 'dry_run': bool - preview mode without making changes
+        sync_tracker : Optional[SyncTracker], default=None
+            Database object to track sync operations and associate with
+            created/updated records for audit purposes
+            
+        Returns
+        -------
+        None
+            This method performs database operations in-place and returns nothing
+            
+        Notes
+        -----
+        This method implements the traditional REST API asset processing workflow:
+        
+        1. **API Asset Retrieval**: Calls `api_dandiset.get_assets()` to retrieve
+           the complete list of assets from the DANDI REST API
+        2. **Error Handling**: Gracefully handles cases where API assets cannot
+           be retrieved and processes deletion detection appropriately
+        3. **Asset Limiting**: Applies the max_assets limit to prevent processing
+           too many assets in a single operation for performance reasons
+        4. **Individual Processing**: Processes each asset individually with
+           progress tracking, filtering by modification time and updating metadata
+        5. **Deletion Detection**: Identifies and handles assets that exist locally
+           but are no longer present in the API response
+           
+        The method handles both complete asset deletion (for assets that only belong
+        to this dandiset) and relationship removal (for assets shared across
+        multiple dandisets). Each asset is processed with individual API calls to
+        `get_raw_metadata()` which provides real-time data but with higher latency
+        compared to the S3 YAML approach.
+        
+        This approach is more traditional but slower than the S3-based approach
+        since it makes individual REST API calls for each asset rather than
+        downloading pre-computed metadata in bulk.
+        
+        Examples
+        --------
+        >>> # Process assets for a dandiset using traditional REST API
+        >>> self._process_assets_for_dandiset(
+        ...     api_dandiset=api_dandiset_instance,
+        ...     local_dandiset=dandiset_instance,
+        ...     last_sync_time=datetime.now(timezone.utc),
+        ...     options={'max_assets': 1000, 'verbose': True},
+        ...     sync_tracker=tracker_instance
+        ... )
+        """
         try:
             # Get assets from API
             try:
@@ -744,8 +1221,71 @@ class Command(BaseCommand):
             if self.verbose:
                 self.stdout.write(f"Error processing assets for {api_dandiset.identifier}: {e}")
 
-    def _sync_dandisets(self, last_sync_time, options):
-        """Sync dandiset metadata"""
+    def _sync_dandisets(
+        self, 
+        last_sync_time: Optional[datetime], 
+        options: Dict[str, Any]
+    ) -> None:
+        """
+        Sync dandiset metadata using the traditional DANDI REST API approach.
+        
+        This method fetches dandisets from the DANDI API, filters them based on
+        modification times, and updates their metadata using individual API calls.
+        It provides the traditional dandisets-only sync functionality that processes
+        metadata without touching asset information.
+
+        Parameters
+        ----------
+        last_sync_time : Optional[datetime]
+            Timestamp of the last successful sync. Dandisets modified after this
+            time will be updated. If None, all dandisets are considered for update.
+        options : Dict[str, Any]
+            Command line options dictionary containing sync configuration such as:
+            - 'dandiset_id': Optional[str] - specific dandiset to sync
+            - 'verbose': bool - enable detailed logging
+            - 'dry_run': bool - preview mode without making changes
+            
+        Returns
+        -------
+        None
+            This method performs database operations in-place and returns nothing
+            
+        Notes
+        -----
+        This method implements the traditional dandiset-only sync workflow:
+        
+        1. **API Fetching**: Retrieves all dandisets from DANDI API or filters
+           to a specific dandiset if `dandiset_id` option is provided
+        2. **Modification Filtering**: Compares API modification times with
+           `last_sync_time` to identify dandisets that need updating
+        3. **Progress Tracking**: Uses progress bars to show filtering and
+           update progress with detailed postfix information
+        4. **Individual Updates**: Processes each dandiset individually using
+           `_update_dandiset()` which calls the REST API for metadata
+           
+        The method handles the case where no dandisets are found or need updating
+        gracefully. It does not process any asset information - this is purely
+        for dandiset metadata synchronization.
+        
+        This approach is straightforward but can be slower for large numbers of
+        dandisets since it makes individual API calls for each dandiset's metadata.
+        It's primarily used for dandisets-only sync operations or as a fallback
+        when the S3-based YAML approach is not available.
+        
+        Examples
+        --------
+        >>> # Sync all dandisets modified since last sync
+        >>> self._sync_dandisets(
+        ...     last_sync_time=datetime.now(timezone.utc),
+        ...     options={'verbose': True}
+        ... )
+        >>> 
+        >>> # Sync a specific dandiset
+        >>> self._sync_dandisets(
+        ...     last_sync_time=None,
+        ...     options={'dandiset_id': 'DANDI:000003', 'verbose': True}
+        ... )
+        """
         self.stdout.write("Fetching dandisets from DANDI API...")
         
         # Get all dandisets (we'll filter later since DANDI API doesn't support date filtering)
@@ -792,8 +1332,74 @@ class Command(BaseCommand):
                     pbar.set_postfix(current=dandiset.identifier)
                     self._update_dandiset(dandiset)
 
-    def _sync_assets(self, last_sync_time, options):
-        """Sync asset metadata"""
+    def _sync_assets(
+        self, 
+        last_sync_time: Optional[datetime], 
+        options: Dict[str, Any]
+    ) -> None:
+        """
+        Sync asset metadata using the traditional DANDI REST API approach.
+        
+        This method processes assets for existing dandisets by fetching asset
+        information from the DANDI API and updating local database records.
+        It includes intelligent filtering to only process dandisets that have
+        been modified since the last sync.
+
+        Parameters
+        ----------
+        last_sync_time : Optional[datetime]
+            Timestamp of the last successful sync. Only dandisets modified after
+            this time will have their assets processed. If None, all dandisets
+            are considered for asset processing.
+        options : Dict[str, Any]
+            Command line options dictionary containing sync configuration such as:
+            - 'dandiset_id': Optional[str] - specific dandiset to sync assets for
+            - 'force_full_sync': bool - bypass modification time checks
+            - 'verbose': bool - enable detailed logging
+            - 'dry_run': bool - preview mode without making changes
+            
+        Returns
+        -------
+        None
+            This method performs database operations in-place and returns nothing
+            
+        Notes
+        -----
+        This method implements a multi-step asset sync workflow:
+        
+        1. **Dandiset Selection**: Queries local database for dandisets to process,
+           either filtering to a specific dandiset ID or selecting all latest versions
+        2. **Modification Filtering**: If `last_sync_time` is provided and not in
+           force_full_sync mode, compares dandiset modification times with the API
+           to only process dandisets that have been updated
+        3. **Asset Processing**: For each selected dandiset, calls
+           `_sync_dandiset_assets()` to handle individual asset synchronization
+        4. **Progress Tracking**: Uses progress bars to show processing status
+           and provides detailed feedback about filtering decisions
+           
+        The method includes sophisticated logic to avoid unnecessary work by
+        leveraging the fact that if a dandiset hasn't been modified, its assets
+        haven't been modified either. This significantly improves performance
+        for incremental syncs.
+        
+        The traditional REST API approach provides real-time data but requires
+        individual API calls for each dandiset and asset, making it slower than
+        bulk approaches but more accurate for immediate consistency needs.
+        
+        Examples
+        --------
+        >>> # Sync assets for all dandisets modified since last sync
+        >>> self._sync_assets(
+        ...     last_sync_time=datetime.now(timezone.utc),
+        ...     options={'verbose': True}
+        ... )
+        >>> 
+        >>> # Sync assets for a specific dandiset
+        >>> self._sync_assets(
+        ...     last_sync_time=None,
+        ...     options={'dandiset_id': 'DANDI:000003', 'verbose': True}
+        ... )
+        """
         self.stdout.write("Syncing assets...")
         
         # Get dandisets to check for assets
@@ -879,8 +1485,73 @@ class Command(BaseCommand):
                     main_pbar.set_postfix(dandiset=dandiset.base_id)
                     self._sync_dandiset_assets(dandiset, last_sync_time, options)
 
-    def _dandiset_needs_update(self, api_dandiset, last_sync_time):
-        """Check if a dandiset needs updating"""
+    def _dandiset_needs_update(
+        self, 
+        api_dandiset: Any, 
+        last_sync_time: Optional[datetime]
+    ) -> bool:
+        """
+        Check if a dandiset needs updating based on modification time comparison.
+        
+        This method compares the API dandiset's modification timestamp with the
+        last sync time to determine if the dandiset has been modified since the
+        last sync and therefore needs to be updated in the local database.
+
+        Parameters
+        ----------
+        api_dandiset : Any
+            DANDI API dandiset object that provides access to modification
+            timestamp through the `modified` attribute. This represents the
+            live dandiset data from the DANDI API.
+        last_sync_time : Optional[datetime]
+            Timestamp of the last successful sync operation. If None, the method
+            will return True (all dandisets need updating). If provided, only
+            dandisets modified after this time will be considered for update.
+            
+        Returns
+        -------
+        bool
+            True if the dandiset needs updating (should be processed), False
+            if it can be skipped. Returns True in the following cases:
+            - last_sync_time is None (first sync or force update)
+            - API dandiset was modified after last_sync_time
+            - Error occurs during comparison (conservative approach)
+            Returns False if:
+            - API dandiset has no modification date
+            - API dandiset was modified before or at last_sync_time
+            
+        Notes
+        -----
+        This method implements the core logic for incremental sync efficiency
+        by avoiding unnecessary processing of unchanged dandisets. The method:
+        
+        1. **Null Check**: Returns True immediately if no last_sync_time provided
+        2. **API Date Extraction**: Retrieves modification timestamp from API
+        3. **Date Validation**: Checks if modification date is available
+        4. **Comparison**: Compares API modification time with last sync time
+        5. **Verbose Logging**: Provides detailed comparison information if enabled
+        6. **Error Handling**: Conservative approach - skips on error rather than
+           risking data corruption
+           
+        The method is conservative in its error handling - if any error occurs
+        during the comparison process, it returns False to skip the dandiset
+        rather than risk processing corrupted or incomplete data.
+        
+        The verbose logging provides detailed information about the decision
+        process, including the actual timestamps being compared and the final
+        decision, which is useful for debugging sync issues.
+        
+        Examples
+        --------
+        >>> # Check if dandiset needs update (first sync)
+        >>> needs_update = self._dandiset_needs_update(api_dandiset, None)
+        >>> # Returns: True (always update on first sync)
+        
+        >>> # Check if dandiset needs update (incremental sync)
+        >>> last_sync = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        >>> needs_update = self._dandiset_needs_update(api_dandiset, last_sync)
+        >>> # Returns: True if api_dandiset.modified > last_sync, False otherwise
+        """
         if not last_sync_time:
             return True
         
