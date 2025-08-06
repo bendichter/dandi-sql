@@ -18,6 +18,15 @@ def perform_dandiset_search(request_params) -> Dict[str, Any]:
     Returns:
         dict: Contains filtered dandisets queryset, filters applied, and other metadata
     """
+    # Helper to parse comma-separated list params strictly (enforce key=1,2 syntax)
+    def expand_list(params, key):
+        raw = params.get(key)
+        if raw is None:
+            return []
+        # Accept only a single value which may be comma-separated
+        parts = [p.strip() for p in str(raw).split(',')]
+        return [p for p in parts if p != '']
+
     # Get all dandisets with basic related data
     dandisets = Dandiset.objects.select_related('assets_summary')
     
@@ -34,7 +43,7 @@ def perform_dandiset_search(request_params) -> Dict[str, Any]:
         filters['search'] = search_query
     
     # Species filter
-    species_params = request_params.getlist('species')
+    species_params = expand_list(request_params, 'species')
     if species_params:
         from ..models import AssetsSummarySpecies, SpeciesType
         from .utils import get_deduplicated_species
@@ -66,7 +75,7 @@ def perform_dandiset_search(request_params) -> Dict[str, Any]:
             filters['species'] = species_params
     
     # Anatomy filter
-    anatomy_params = request_params.getlist('anatomy')
+    anatomy_params = expand_list(request_params, 'anatomy')
     if anatomy_params:
         from ..models import Anatomy
         anatomy_ids = []
@@ -88,7 +97,7 @@ def perform_dandiset_search(request_params) -> Dict[str, Any]:
             filters['anatomy'] = anatomy_params
     
     # Approach filter
-    approach_params = request_params.getlist('approach')
+    approach_params = expand_list(request_params, 'approach')
     if approach_params:
         from ..models import AssetsSummaryApproach, ApproachType
         approach_ids = []
@@ -112,7 +121,7 @@ def perform_dandiset_search(request_params) -> Dict[str, Any]:
             filters['approach'] = approach_params
     
     # Measurement technique filter
-    technique_params = request_params.getlist('measurement_technique')
+    technique_params = expand_list(request_params, 'measurement_technique')
     if technique_params:
         from ..models import AssetsSummaryMeasurementTechnique, MeasurementTechniqueType
         technique_ids = []
@@ -136,7 +145,7 @@ def perform_dandiset_search(request_params) -> Dict[str, Any]:
             filters['measurement_technique'] = technique_params
     
     # Subject sex filter
-    sex_params = request_params.getlist('sex')
+    sex_params = expand_list(request_params, 'sex')
     if sex_params:
         from ..models import SexType
         sex_ids = []
@@ -248,7 +257,7 @@ def perform_dandiset_search(request_params) -> Dict[str, Any]:
             pass
     
     # Variables measured filter
-    variables_measured = request_params.getlist('variables_measured')
+    variables_measured = expand_list(request_params, 'variables_measured')
     if variables_measured:
         variable_queries = Q()
         for variable in variables_measured:
@@ -257,7 +266,7 @@ def perform_dandiset_search(request_params) -> Dict[str, Any]:
         filters['variables_measured'] = variables_measured
     
     # Data standards filter
-    data_standards_params = request_params.getlist('data_standards')
+    data_standards_params = expand_list(request_params, 'data_standards')
     if data_standards_params:
         from ..models import AssetsSummaryDataStandard, StandardsType
         data_standard_ids = []
@@ -285,8 +294,8 @@ def perform_dandiset_search(request_params) -> Dict[str, Any]:
     asset_min_size = request_params.get('asset_min_size')
     asset_max_size = request_params.get('asset_max_size')
     asset_dandiset_id = request_params.get('asset_dandiset_id', '').strip()
-    asset_sex_params = request_params.getlist('asset_sex')
-    file_formats = request_params.getlist('file_format')
+    asset_sex_params = expand_list(request_params, 'asset_sex')
+    file_formats = expand_list(request_params, 'file_format')
     
     # Build asset query for filtering assets within dandisets
     asset_query = Q()

@@ -580,66 +580,95 @@
 // Store loaded assets to avoid reloading
 const loadedAssets = new Set();
 
-// Function to build clean URL with only non-empty parameters
+/**
+ * Build clean URL, enforcing comma-separated syntax for multi-value fields (key=a,b,c).
+ * Multi-select fields that must be comma-joined:
+ *   species, anatomy, approach, measurement_technique, file_format, data_standards, variables_measured, asset_sex
+ * All other fields are appended as single values if non-empty.
+ */
 function buildCleanUrl(form) {
     const params = new URLSearchParams();
-    
-    // Get all form elements
+
+    // Define multi-value field names we will encode as comma-separated lists
+    const multiValueFields = new Set([
+        'species',
+        'anatomy',
+        'approach',
+        'measurement_technique',
+        'file_format',
+        'data_standards',
+        'variables_measured',
+        'asset_sex'
+    ]);
+
+    // Collect values per field
+    const fieldValues = new Map();
+
     const elements = form.querySelectorAll('input, select');
-    
     elements.forEach(element => {
-        if (!element.name) return; // Skip elements without names
-        
-        if (element.type === 'text' || element.type === 'number' || element.type === 'date') {
-            // For regular inputs, check if value is not empty
-            if (element.value && element.value.trim() !== '') {
-                params.append(element.name, element.value.trim());
-            }
-        } else if (element.tagName.toLowerCase() === 'select' && element.multiple) {
-            // For multi-select elements, add each selected option
+        if (!element.name) return;
+        const name = element.name;
+
+        if (element.tagName.toLowerCase() === 'select' && element.multiple) {
+            // Gather selected values for multi-selects
             const selectedOptions = Array.from(element.selectedOptions);
-            selectedOptions.forEach(option => {
-                if (option.value) {
-                    // For variables_measured, use the display text, for others use the option value (ID)
-                    if (element.name === 'variables_measured') {
-                        params.append(element.name, option.textContent.trim());
-                    } else {
-                        params.append(element.name, option.value);
-                    }
-                }
-            });
+            const values = selectedOptions
+                .map(opt => {
+                    if (!opt.value) return null;
+                    // variables_measured uses label text; others use value
+                    return name === 'variables_measured' ? opt.textContent.trim() : opt.value;
+                })
+                .filter(v => v && v.trim() !== '');
+
+            if (values.length > 0) {
+                fieldValues.set(name, (fieldValues.get(name) || []).concat(values));
+            }
+        } else if (element.type === 'text' || element.type === 'number' || element.type === 'date') {
+            const val = (element.value || '').trim();
+            if (val !== '') {
+                fieldValues.set(name, [val]);
+            }
         } else if (element.tagName.toLowerCase() === 'select') {
-            // For single select elements, check if it's the order_by dropdown
+            // Single select
             if (element.value && element.value.trim() !== '') {
-                if (element.name === 'order_by') {
-                    // For order_by, use the value (contains Django field names)
-                    params.append(element.name, element.value);
+                if (name === 'order_by') {
+                    fieldValues.set(name, [element.value]);
                 } else {
-                    // For other single selects, use the display text
                     const selectedOption = element.options[element.selectedIndex];
-                    params.append(element.name, selectedOption.textContent.trim());
+                    fieldValues.set(name, [selectedOption ? selectedOption.textContent.trim() : element.value]);
                 }
             }
         }
     });
-    
+
+    // Write params, encoding multi-value fields as comma-separated single keys
+    for (const [name, values] of fieldValues.entries()) {
+        if (!values || values.length === 0) continue;
+        if (multiValueFields.has(name)) {
+            // Deduplicate and join with commas
+            const joined = Array.from(new Set(values)).join(',');
+            params.set(name, joined);
+        } else {
+            // Single value field: use the first non-empty value
+            params.set(name, values[0]);
+        }
+    }
+
     const queryString = params.toString();
     return window.location.pathname + (queryString ? '?' + queryString : '');
 }
 
 // Function to get current search filters from the form
+/**
+ * Return current filters encoded like buildCleanUrl does (comma-separated multi-values).
+ * Used when fetching assets so it matches backend expectations.
+ */
 function getCurrentFilters() {
     const form = document.getElementById('searchForm');
-    const formData = new FormData(form);
-    const params = new URLSearchParams();
-    
-    for (const [key, value] of formData.entries()) {
-        if (value && value.trim() !== '') {
-            params.append(key, value);
-        }
-    }
-    
-    return params.toString();
+    // Reuse the same logic as buildCleanUrl to ensure consistency
+    const url = buildCleanUrl(form);
+    const qs = url.split('?')[1] || '';
+    return qs;
 }
 
 // Function to load assets for a dandiset
